@@ -1,31 +1,37 @@
-"""
-Streamlit frontend — chiama api.py via httpx
-Avvio: streamlit run app.py
-"""
+# app.py — STANDALONE per Streamlit Cloud
 import uuid, time
 import streamlit as st
-import httpx
+
+# Importa core direttamente (no httpx, no API)
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
+
+from core.client  import GeminiClient
+from core.session import SessionManager, SessionState
+
+API_BASE = None  # non serve
+
+st.set_page_config(page_title="Gemini Chat", page_icon="✦", layout="wide")
 
 # ------------------------------------------------------------------ #
-#  Config                                                              #
+#  Client singleton (una sola istanza per tutto Streamlit)            #
 # ------------------------------------------------------------------ #
-API_BASE = "http://localhost:8000"   # cambia con URL deploy se remoto
-TIMEOUT  = 60.0
-
-st.set_page_config(
-    page_title = "Gemini Chat",
-    page_icon  = "✦",
-    layout     = "wide",
-)
+@st.cache_resource
+def get_client() -> GeminiClient:
+    client = GeminiClient()
+    return client
 
 # ------------------------------------------------------------------ #
 #  Session state                                                       #
 # ------------------------------------------------------------------ #
 def _init():
-    if "session_id"   not in st.session_state:
-        st.session_state.session_id   = str(uuid.uuid4())
-    if "messages"     not in st.session_state:
-        st.session_state.messages     = []
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = str(uuid.uuid4())
+    if "messages"   not in st.session_state:
+        st.session_state.messages   = []
+    if "gem_state"  not in st.session_state:
+        # Stato Gemini per-utente
+        st.session_state.gem_state  = SessionState()
     if "use_engineer" not in st.session_state:
         st.session_state.use_engineer = True
     if "force_complete" not in st.session_state:
@@ -34,53 +40,48 @@ def _init():
 _init()
 
 # ------------------------------------------------------------------ #
+#  Bootstrap automatico                                                #
+# ------------------------------------------------------------------ #
+client = get_client()
+state: SessionState = st.session_state.gem_state
+
+if not state.bl:
+    with st.spinner("Connessione a Gemini..."):
+        try:
+            client.bootstrap(state)
+        except Exception as e:
+            st.error(f"Bootstrap fallito: {e}")
+            st.stop()
+
+# ------------------------------------------------------------------ #
 #  Sidebar                                                             #
 # ------------------------------------------------------------------ #
 with st.sidebar:
-    st.markdown("## ✦ Gemini Chat v13")
+    st.markdown("## ✦ Gemini Chat")
     st.markdown("---")
 
     st.session_state.use_engineer = st.toggle(
-        "Prompt Engineer", value=st.session_state.use_engineer,
-        help="Riscrive il prompt per ottenere risposte migliori"
+        "Prompt Engineer", value=st.session_state.use_engineer
     )
     st.session_state.force_complete = st.toggle(
-        "Auto-completa liste", value=st.session_state.force_complete,
-        help="Forza completamento di liste numeriche"
+        "Auto-completa liste", value=st.session_state.force_complete
     )
 
     st.markdown("---")
     st.caption(f"Session: `{st.session_state.session_id[:8]}...`")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🗑 Nuova chat", use_container_width=True):
-            st.session_state.session_id = str(uuid.uuid4())
-            st.session_state.messages   = []
-            st.rerun()
-    with col2:
-        if st.button("🔄 Reset API", use_container_width=True):
-            try:
-                httpx.delete(
-                    f"{API_BASE}/session/{st.session_state.session_id}",
-                    timeout=5
-                )
-            except Exception:
-                pass
-            st.session_state.session_id = str(uuid.uuid4())
-            st.session_state.messages   = []
-            st.rerun()
+    if st.button("🗑 Nuova chat", use_container_width=True):
+        st.session_state.session_id = str(uuid.uuid4())
+        st.session_state.messages   = []
+        st.session_state.gem_state  = SessionState()
+        st.rerun()
 
+    # Status
     st.markdown("---")
-    # Health check
-    try:
-        r = httpx.get(f"{API_BASE}/health", timeout=3)
-        if r.status_code == 200:
-            st.success("API online ✓", icon="✅")
-        else:
-            st.error(f"API errore {r.status_code}")
-    except Exception as e:
-        st.error(f"API offline: {e}")
+    if state.bl:
+        st.success("Gemini connesso ✓")
+    else:
+        st.error("Non connesso")
 
 # ------------------------------------------------------------------ #
 #  Chat history                                                        #
@@ -91,69 +92,46 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"],
                          avatar="🧑" if msg["role"] == "user" else "✦"):
         st.markdown(msg["content"])
-        if msg.get("meta"):
-            m = msg["meta"]
-            cols = st.columns(3)
-            cols[0].caption(f"⏱ {m.get('elapsed_ms',0)}ms")
-            if m.get("enhancements"):
-                cols[1].caption(f"🔧 {', '.join(m['enhancements'])}")
-            cols[2].caption(f"🔑 {m.get('session_id','')[:8]}")
+        if msg.get("elapsed_ms"):
+            st.caption(f"⏱ {msg['elapsed_ms']}ms"
+                       + (f"  🔧 {', '.join(msg['enhancements'])}"
+                          if msg.get("enhancements") else ""))
 
 # ------------------------------------------------------------------ #
 #  Input                                                               #
 # ------------------------------------------------------------------ #
 if prompt := st.chat_input("Scrivi a Gemini…"):
-    # Mostra messaggio utente
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user", avatar="🧑"):
         st.markdown(prompt)
 
-    # Chiamata API
     with st.chat_message("assistant", avatar="✦"):
         placeholder = st.empty()
-        placeholder.markdown("_Gemini sta elaborando…_ ⏳")
+        placeholder.markdown("_Elaboro…_ ⏳")
 
         t0 = time.perf_counter()
         try:
-            resp = httpx.post(
-                f"{API_BASE}/ask",
-                json={
-                    "message":        prompt,
-                    "session_id":     st.session_state.session_id,
-                    "use_engineer":   st.session_state.use_engineer,
-                    "force_complete": st.session_state.force_complete,
-                },
-                timeout=TIMEOUT,
+            answer, tags = client.chat(
+                message        = prompt,
+                state          = state,
+                use_engineer   = st.session_state.use_engineer,
+                force_complete = st.session_state.force_complete,
             )
-            if resp.status_code == 200:
-                data   = resp.json()
-                answer = data["answer"]
-                meta   = {
-                    "elapsed_ms":   data["elapsed_ms"],
-                    "enhancements": data["enhancements"],
-                    "session_id":   data["session_id"],
-                }
-                placeholder.markdown(answer)
+            elapsed = int((time.perf_counter() - t0) * 1000)
+            placeholder.markdown(answer)
+            st.caption(f"⏱ {elapsed}ms"
+                       + (f"  🔧 {', '.join(tags)}" if tags else ""))
 
-                # Mostra meta sotto
-                mcols = st.columns(3)
-                mcols[0].caption(f"⏱ {data['elapsed_ms']}ms")
-                if data["enhancements"]:
-                    mcols[1].caption(f"🔧 {', '.join(data['enhancements'])}")
-                mcols[2].caption(f"🔑 {data['session_id'][:8]}")
+            st.session_state.messages.append({
+                "role":        "assistant",
+                "content":     answer,
+                "elapsed_ms":  elapsed,
+                "enhancements": tags,
+            })
 
-                st.session_state.messages.append({
-                    "role":    "assistant",
-                    "content": answer,
-                    "meta":    meta,
-                })
-            else:
-                detail = resp.json().get("detail", resp.text)
-                placeholder.error(f"Errore {resp.status_code}: {detail}")
-
-        except httpx.TimeoutException:
-            placeholder.error("⏱ Timeout — la richiesta ha impiegato troppo")
-        except httpx.ConnectError:
-            placeholder.error("🔌 Impossibile connettersi all'API. È avviata?")
+        except RuntimeError as e:
+            placeholder.error(str(e))
         except Exception as e:
-            placeholder.error(f"Errore inatteso: {e}")
+            placeholder.error(f"Errore: {e}")
+            # Se sessione corrotta, reset automatico
+            st.session_state.gem_state = SessionState()
