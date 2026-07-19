@@ -10,9 +10,9 @@ class GeminiClient:
  B="https://gemini.google.com"
  A=B+"/app"
  S=B+"/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate"
- U="https://push.clients6.google.com/upload/"
+ U="https://content-push.googleapis.com/upload/"
  CK="SOCS=CAESNggeEixib3FfYXNzaXN0YW50LWJhcmQtd2ViLXNlcnZlcl8yMDI2MDcwOS4wOV9wMBoCaXQgARoGCICyy9IG"
- MIME_IMG={".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".webp":"image/webp",".gif":"image/gif",".bmp":"image/bmp",".heic":"image/heic",".heif":"image/heif"}
+ MIME_IMG={".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".webp":"image/webp",".gif":"image/gif",".bmp":"image/bmp"}
  MIME_DOC={".pdf":"application/pdf",".txt":"text/plain",".md":"text/markdown",".csv":"text/csv",".json":"application/json"}
  LR=re.compile(r'\b(\d{2,})\s+(?:titoli|giochi|film|libri|nomi|esempi|idee|cose|elementi|items?|prodotti|canzoni|album|serie|prompt|domande|risposte)',re.I)
  def __init__(self):
@@ -37,12 +37,12 @@ class GeminiClient:
   if not mime or mime=="application/octet-stream":mime=self._detect_mime(name)
   size=len(data)
   if mime.startswith("image/") and size>262144:raise RuntimeError(f"Immagine {size/1024:.0f}KB > 256KB max")
-  h1={"x-goog-upload-command":"start","x-goog-upload-protocol":"resumable","x-goog-upload-header-content-length":str(size),"x-goog-upload-header-content-type":mime,"content-type":"application/x-www-form-urlencoded;charset=UTF-8"}
+  h1={"x-goog-upload-command":"start","x-goog-upload-protocol":"resumable","x-goog-upload-header-content-length":str(size),"x-goog-upload-header-content-type":mime,"x-tenant-id":"bard-storage","push-id":"feeds/mcudyrk2a4khkz","content-type":"application/x-www-form-urlencoded;charset=UTF-8"}
   r1=self._h.post(self.U,headers=h1,data=f"File name: {name}",timeout=20)
   if r1.status_code!=200:raise RuntimeError(f"Upload init HTTP {r1.status_code}: {r1.text[:200]}")
   url=r1.headers.get("x-goog-upload-url") or r1.headers.get("X-Goog-Upload-URL")
   if not url:raise RuntimeError(f"Upload URL mancante. Headers: {dict(r1.headers)}")
-  h2={"x-goog-upload-command":"upload, finalize","x-goog-upload-offset":"0","content-type":mime}
+  h2={"x-goog-upload-command":"upload, finalize","x-goog-upload-offset":"0","x-tenant-id":"bard-storage","content-type":mime}
   r2=self._h.post(url,headers=h2,data=data,timeout=60)
   if r2.status_code!=200:raise RuntimeError(f"Upload finalize HTTP {r2.status_code}: {r2.text[:200]}")
   uid=r2.text.strip()
