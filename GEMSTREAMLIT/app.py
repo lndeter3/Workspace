@@ -48,6 +48,8 @@ input,textarea{font-size:16px!important;}
 .hero{text-align:center;padding:3rem 1rem 2rem;}
 .hero h1{font-size:2rem;font-weight:600;background:linear-gradient(135deg,#a78bfa,#f472b6,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:0 0 8px;letter-spacing:-0.02em;}
 .hero p{color:#666;font-size:14px;}
+.hidden-btn-anchor{width:0;height:0;overflow:hidden;position:absolute;}
+.hidden-btn-anchor + div{position:fixed!important;left:-99999px!important;top:-99999px!important;width:1px!important;height:1px!important;overflow:hidden!important;opacity:0!important;pointer-events:none!important;visibility:hidden!important;}
 @media (max-width:768px){
  .block-container{padding:0.5rem 0.7rem 12rem!important;}
  section[data-testid="stSidebar"]{width:85vw!important;}
@@ -142,6 +144,13 @@ if "msg" in qp:
   st.session_state._new_msg=msg_txt
   st.query_params.clear()
   st.rerun()
+if "plus" in qp:
+ pid=qp.get("plus","")
+ if pid and pid!=st.session_state.get("last_plus_id",""):
+  st.session_state.last_plus_id=pid
+  st.session_state.show_up=not st.session_state.show_up
+  st.query_params.clear()
+  st.rerun()
 
 def composer(auto_tts=False,files_html=""):
  has_files=bool(files_html)
@@ -224,31 +233,24 @@ def composer(auto_tts=False,files_html=""):
   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(!csend.disabled)doSend();}
  });
 
+ function goWithParams(params){
+  const win=window.parent||window;
+  const url=new URL(win.location.href);
+  Object.keys(params).forEach(k=>url.searchParams.set(k,params[k]));
+  win.history.replaceState({},'',url.toString());
+  win.location.reload();
+ }
+ function randId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
+
  function doSend(){
   const txt=cta.value.trim();
   if(!txt)return;
-  const doc=window.parent?window.parent.document:document;
-  const win=window.parent||window;
-  const mid=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
-  const url=new URL(win.location.href);
-  url.searchParams.set('msg',txt);
-  url.searchParams.set('mid',mid);
-  win.history.replaceState({},'',url.toString());
   cta.value='';autoResize();toggleSend();
-  win.location.reload();
+  goWithParams({msg:txt,mid:randId()});
  }
  csend.addEventListener('click',doSend);
 
- function clickHidden(id){
-  const doc=window.parent?window.parent.document:document;
-  const btns=doc.querySelectorAll('button');
-  for(const b of btns){
-   const t=(b.textContent||'').trim();
-   if(t===id){b.click();return true;}
-  }
-  return false;
- }
- cplus.addEventListener('click',()=>{clickHidden('__PLUS__');});
+ cplus.addEventListener('click',()=>{goWithParams({plus:randId()});});
 
  let bestVoices={it:null,en:null};
  function pickVoice(lang){
@@ -437,6 +439,10 @@ with st.sidebar:
   st.session_state.complete=st.toggle("Auto complete",value=st.session_state.complete)
   st.session_state.stream=st.toggle("Stream (SSE)",value=st.session_state.stream)
   st.session_state.auto_tts=st.toggle("Auto TTS",value=st.session_state.auto_tts)
+  st.divider()
+  if st.button("Attach files",use_container_width=True):
+   st.session_state.show_up=not st.session_state.show_up
+   st.rerun()
  st.divider()
  status_class="on" if ok else "off"
  st.markdown(f"<div><span class='dot {status_class}'></span>API {'online' if ok else 'offline'}</div>",unsafe_allow_html=True)
@@ -490,19 +496,6 @@ else:
    if m.get("meta"):st.caption(m["meta"])
    if m["role"]=="assistant" and m.get("content"):
     components.html(tts_inline(m["content"],auto=False,key=f"m{i}"),height=42)
-
- with st.container():
-  cc=st.columns([1,100])
-  with cc[0]:
-   if st.button("__PLUS__",key="plus_hidden"):
-    st.session_state.show_up=not st.session_state.show_up
-    st.rerun()
-
- st.markdown("<style>[data-testid='column']:has(button:contains('__PLUS__')){position:absolute;left:-9999px;}</style>",unsafe_allow_html=True)
- st.markdown("""<style>
- div[data-testid="stHorizontalBlock"]:has(button[kind="secondary"]:where(:not([data-testid]))) button:where(*):is([data-testid="baseButton-secondary"]) {display:none;}
- button[kind="secondary"]:has-text("__PLUS__"){position:fixed;left:-9999px;top:-9999px;}
- </style>""",unsafe_allow_html=True)
 
  if st.session_state.show_up:
   with st.expander("Attach files",expanded=True):
