@@ -103,4 +103,88 @@ with st.sidebar:
   st.markdown(f"<div style='color:#8e8e8e;font-size:12px;margin:8px 0 4px;'>{len(st.session_state.pending)} file pronti</div>",unsafe_allow_html=True)
   for i,f in enumerate(st.session_state.pending):
    c1,c2=st.columns([5,1])
-   
+   ic={"image":"🖼","text":"📝","binary":"📦"}.get(f["kind"],"📄")
+   c1.markdown(f"<div class='file-chip'>{ic} {f['name'][:22]}{'...' if len(f['name'])>22 else ''} <span style='color:#666;font-size:11px;'>{f['size']/1024:.0f}KB</span></div>",unsafe_allow_html=True)
+   if c2.button("✕",key=f"rm_{i}"):
+    st.session_state.pending.pop(i)
+    st.rerun()
+ st.markdown("<div style='position:absolute;bottom:20px;left:20px;right:20px;'>",unsafe_allow_html=True)
+ dot="status-on" if gs.bl else "status-off"
+ st.markdown(f"<div style='color:#8e8e8e;font-size:12px;'><span class='status-dot {dot}'></span>{'Connesso' if gs.bl else 'Off'}</div><div style='color:#555;font-size:10px;margin-top:4px;font-family:monospace;'>{st.session_state.sid[:16]}</div></div>",unsafe_allow_html=True)
+if not st.session_state.msg:
+ st.markdown("<div class='hero'><div class='hero-title'>✨ Come posso aiutarti oggi?</div><div class='hero-sub'>Chiedi qualsiasi cosa, carica file, esplora idee</div></div>",unsafe_allow_html=True)
+for m in st.session_state.msg:
+ with st.chat_message(m["role"],avatar="👤" if m["role"]=="user" else "✨"):
+  if m.get("files"):
+   chips="".join(f"<span class='file-chip'>{'🖼' if fi.get('kind')=='image' else '📝' if fi.get('kind')=='text' else '📦'} {fi['name']}</span>" for fi in m["files"])
+   st.markdown(f"<div style='margin-bottom:8px;'>{chips}</div>",unsafe_allow_html=True)
+  st.markdown(m["content"])
+  if m.get("ms"):
+   tg=" · ".join(m.get("tags") or [])
+   st.caption(f"⏱ {m['ms']}ms"+(f" · 🔧 {tg}" if tg else ""))
+if p:=st.chat_input("Scrivi a Gemini..."):
+ attached=list(st.session_state.pending)
+ amt=[{"name":f["name"],"kind":f["kind"],"size":f["size"]} for f in attached]
+ st.session_state.msg.append({"role":"user","content":p,"files":amt})
+ with st.chat_message("user",avatar="👤"):
+  if amt:
+   chips="".join(f"<span class='file-chip'>{'🖼' if fi['kind']=='image' else '📝' if fi['kind']=='text' else '📦'} {fi['name']}</span>" for fi in amt)
+   st.markdown(f"<div style='margin-bottom:8px;'>{chips}</div>",unsafe_allow_html=True)
+  st.markdown(p)
+ with st.chat_message("assistant",avatar="✨"):
+  ph=st.empty()
+  info=st.empty()
+  t0=time.perf_counter()
+  final_prompt=p
+  uploaded=[]
+  text_blocks=[]
+  try:
+   text_files=[f for f in attached if f["kind"]=="text"]
+   image_files=[f for f in attached if f["kind"]=="image"]
+   skipped=[f for f in attached if f["kind"]=="binary"]
+   for f in text_files:
+    if f["size"]>MAX_TEXT_BYTES:
+     info.warning(f"⚠ {f['name']} troppo grande ({f['size']/1024:.0f}KB), skip")
+     continue
+    content=read_text_bytes(f["bytes"],f["name"])
+    text_blocks.append(format_text_file(f["name"],content))
+   if text_blocks:
+    final_prompt="".join(text_blocks)+"\n\n"+p
+    if st.session_state.debug:st.caption(f"📝 {len(text_files)} file testuali inlined ({len(final_prompt)} char)")
+   if image_files:
+    for idx,f in enumerate(image_files):
+     info.markdown(f"<div style='color:#8e8e8e;font-size:13px;'>⬆ Upload immagine {f['name']} ({idx+1}/{len(image_files)})...</div>",unsafe_allow_html=True)
+     try:
+      result=cl.upload_image(f["bytes"],f["name"],f["mime"] or "image/jpeg")
+      uploaded.append(result)
+      if st.session_state.debug:st.caption(f"✓ {f['name']} → ID: {result['id'][:30]}...")
+     except Exception as ue:
+      info.error(f"❌ Upload immagine {f['name']}: {ue}")
+      raise
+   if skipped and st.session_state.debug:
+    info.warning(f"⚠ {len(skipped)} file binari ignorati (non supportati)")
+   if uploaded:
+    info.markdown(f"<div style='color:#10a37f;font-size:13px;'>✓ {len(uploaded)} immagini caricate</div>",unsafe_allow_html=True)
+   ph.markdown("<div style='color:#8e8e8e;'>_Sto pensando..._ ⏳</div>",unsafe_allow_html=True)
+   ans,tags=cl.chat(message=final_prompt,state=gs,use_engineer=st.session_state.eng,force_complete=st.session_state.fc,files=uploaded if uploaded else None)
+   ms=int((time.perf_counter()-t0)*1000)
+   info.empty()
+   ph.markdown(ans)
+   tg=" · ".join(tags) if tags else ""
+   extra=[]
+   if text_blocks:extra.append(f"📝 {len(text_blocks)} file inlined")
+   if uploaded:extra.append(f"🖼 {len(uploaded)} img")
+   extra_str=" · "+" · ".join(extra) if extra else ""
+   st.caption(f"⏱ {ms}ms"+(f" · 🔧 {tg}" if tg else "")+extra_str)
+   st.session_state.msg.append({"role":"assistant","content":ans,"ms":ms,"tags":tags})
+   st.session_state.pending=[]
+   st.session_state.upk+=1
+  except RuntimeError as e:
+   info.empty()
+   ph.error(f"⚠ {e}")
+   if st.session_state.debug:st.code(traceback.format_exc())
+  except Exception as e:
+   info.empty()
+   ph.error(f"⚠ {type(e).__name__}: {e}")
+   if st.session_state.debug:st.code(traceback.format_exc())
+   st.session_state.gs=SessionState()
