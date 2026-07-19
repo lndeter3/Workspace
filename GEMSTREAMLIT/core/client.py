@@ -13,7 +13,6 @@ class GeminiClient:
  U="https://push.clients6.google.com/upload/"
  CK="SOCS=CAESNggeEixib3FfYXNzaXN0YW50LWJhcmQtd2ViLXNlcnZlcl8yMDI2MDcwOS4wOV9wMBoCaXQgARoGCICyy9IG"
  MIME_IMG={".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".webp":"image/webp",".gif":"image/gif",".bmp":"image/bmp"}
- MIME_DOC={".pdf":"application/pdf",".txt":"text/plain",".md":"text/markdown",".csv":"text/csv",".json":"application/json"}
  LR=re.compile(r'\b(\d{2,})\s+(?:titoli|giochi|film|libri|nomi|esempi|idee|cose|elementi|items?|prodotti|canzoni|album|serie|prompt|domande|risposte)',re.I)
  def __init__(self):
   self._h=self._mk()
@@ -30,23 +29,18 @@ class GeminiClient:
    m=re.search(rf'"{n}"\s*:\s*"([^"]+)"',h)
    if m:setattr(st,a,m.group(1))
   if not st.bl:raise RuntimeError("Bootstrap: bl mancante")
- def _detect_mime(self,name):
-  ext=Path(name).suffix.lower()
-  return self.MIME_IMG.get(ext) or self.MIME_DOC.get(ext) or mimetypes.guess_type(name)[0] or "application/octet-stream"
- def upload_bytes(self,data,name,mime=None):
-  if not mime or mime=="application/octet-stream":mime=self._detect_mime(name)
+ def upload_image(self,data,name,mime):
   size=len(data)
-  if mime.startswith("image/") and size>262144:raise RuntimeError(f"Immagine {size/1024:.0f}KB > 256KB max")
+  if size>262144:raise RuntimeError(f"Immagine {size/1024:.0f}KB > 256KB max")
   h1={"x-goog-upload-command":"start","x-goog-upload-protocol":"resumable","x-goog-upload-header-content-length":str(size),"x-goog-upload-header-content-type":mime,"push-id":"feeds/mcudyrk2a4khkz","content-type":"application/x-www-form-urlencoded;charset=UTF-8"}
   r1=self._h.post(self.U,headers=h1,data=f"File name: {name}",timeout=20)
   if r1.status_code!=200:raise RuntimeError(f"Upload init HTTP {r1.status_code}: {r1.text[:200]}")
   url=r1.headers.get("x-goog-upload-url") or r1.headers.get("X-Goog-Upload-URL")
-  if not url:raise RuntimeError(f"Upload URL mancante. Headers: {dict(r1.headers)}")
-  h2={"x-goog-upload-command":"upload, finalize","x-goog-upload-offset":"0"}
-  r2=self._h.post(url,headers=h2,data=data,timeout=60)
+  if not url:raise RuntimeError(f"Upload URL mancante")
+  r2=self._h.post(url,headers={"x-goog-upload-command":"upload, finalize","x-goog-upload-offset":"0"},data=data,timeout=60)
   if r2.status_code!=200:raise RuntimeError(f"Upload finalize HTTP {r2.status_code}: {r2.text[:200]}")
   uid=r2.text.strip()
-  if not uid or len(uid)<5:raise RuntimeError(f"Upload ID invalido: '{uid[:100]}'")
+  if not uid or len(uid)<5:raise RuntimeError(f"Upload ID invalido")
   return {"id":uid,"name":name,"mime":mime,"size":size}
  def chat(self,message,state,use_engineer=True,force_complete=True,files=None):
   SessionManager.throttle(state)
