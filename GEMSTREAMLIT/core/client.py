@@ -7,6 +7,7 @@ from .session import SessionState,SessionManager
 class GeminiClient:
  UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
  B="https://gemini.google.com";A=B+"/app";S=B+"/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate"
+ U="https://push.clients6.google.com/upload/"
  CK="SOCS=CAESNggeEixib3FfYXNzaXN0YW50LWJhcmQtd2ViLXNlcnZlcl8yMDI2MDcwOS4wOV9wMBoCaXQgARoGCICyy9IG"
  LR=re.compile(r'\b(\d{2,})\s+(?:titoli|giochi|film|libri|nomi|esempi|idee|cose|elementi|items?|prodotti|canzoni|album|serie|prompt|domande|risposte)',re.I)
  def __init__(self):self._h=self._mk()
@@ -18,15 +19,27 @@ class GeminiClient:
    m=re.search(rf'"{n}"\s*:\s*"([^"]+)"',h)
    if m:setattr(st,a,m.group(1))
   if not st.bl:raise RuntimeError("Bootstrap: bl mancante")
- def chat(self,message,state,use_engineer=True,force_complete=True):
+ def upload_file(self,path,name,mime,state):
+  import os
+  size=os.path.getsize(path)
+  h1={"x-goog-upload-command":"start","x-goog-upload-protocol":"resumable","x-goog-upload-header-content-length":str(size),"x-goog-upload-header-content-type":mime,"content-type":"application/x-www-form-urlencoded;charset=UTF-8"}
+  r1=self._h.post(self.U,headers=h1,data=f"File name: {name}",timeout=20)
+  url=r1.headers.get("x-goog-upload-url")
+  if not url:raise RuntimeError(f"Upload init: HTTP {r1.status_code}")
+  with open(path,"rb") as f:data=f.read()
+  r2=self._h.post(url,headers={"x-goog-upload-command":"upload, finalize","x-goog-upload-offset":"0"},data=data,timeout=60)
+  if r2.status_code!=200:raise RuntimeError(f"Upload: HTTP {r2.status_code}")
+  uid=r2.text.strip()
+  if not uid or len(uid)<5:raise RuntimeError("Upload ID invalido")
+  return uid
+ def chat(self,message,state,use_engineer=True,force_complete=True,files=None):
   SessionManager.throttle(state);SessionManager.pre(state)
-  orig=message
-  tags=[]
+  orig=message;tags=[]
   if use_engineer:message,tags=PromptEngineer.enhance(message)
   last=None;sr=False
   for a in range(4):
    try:
-    ans=self._send(message,state);ans=PromptEngineer.clean(ans)
+    ans=self._send(message,state,files);ans=PromptEngineer.clean(ans)
     if force_complete:ans=self._cont(orig,ans,state)
     return ans,tags
    except ValueError as e:
@@ -38,13 +51,14 @@ class GeminiClient:
     last=e
     if a<3:time.sleep(1);continue
   raise RuntimeError(f"Tentativi esauriti: {last}")
- def _send(self,msg,st):
+ def _send(self,msg,st,files=None):
   st.reqid+=100000;p={"bl":st.bl,"f.sid":st.fsid or"-1","hl":"it","_reqid":str(st.reqid),"rt":"c"}
-  mp=[msg,0,None,None,None,None,0];ip=[st.cid,st.rid,st.rcid,None,None,None,None,None,None,""]
+  att=[[[f["id"],f["name"]],1] for f in files] if files else None
+  mp=[msg,0,None,att,None,None,0];ip=[st.cid,st.rid,st.rcid,None,None,None,None,None,None,""]
   inner=[mp,["it"],ip];outer=[None,json.dumps(inner,ensure_ascii=False)]
   body="f.req="+quote(json.dumps(outer,ensure_ascii=False),safe="")
   if st.at:body+="&at="+quote(st.at,safe="")
-  r=self._h.post(self.S,params=p,data=body,headers={"content-type":"application/x-www-form-urlencoded;charset=UTF-8"},timeout=30)
+  r=self._h.post(self.S,params=p,data=body,headers={"content-type":"application/x-www-form-urlencoded;charset=UTF-8"},timeout=45 if files else 30)
   if r.status_code!=200:raise ValueError(f"HTTP {r.status_code}")
   txt,ids=GeminiParser.parse(r.text);st.cid=ids["cid"] or st.cid;st.rid=ids["rid"] or st.rid;st.rcid=ids["rcid"] or st.rcid;return txt
  def _cont(self,orig,ans,state):
