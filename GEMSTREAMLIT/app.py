@@ -2,24 +2,20 @@
 import uuid, time
 import streamlit as st
 
-# Importa core direttamente (no httpx, no API)
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from core.client  import GeminiClient
 from core.session import SessionManager, SessionState
 
-API_BASE = None  # non serve
-
-st.set_page_config(page_title="Gemini Chat", page_icon="✦", layout="wide")
+st.set_page_config(page_title="Gemini Chat", page_icon="✨", layout="wide")
 
 # ------------------------------------------------------------------ #
-#  Client singleton (una sola istanza per tutto Streamlit)            #
+#  Client singleton                                                    #
 # ------------------------------------------------------------------ #
 @st.cache_resource
 def get_client() -> GeminiClient:
-    client = GeminiClient()
-    return client
+    return GeminiClient()
 
 # ------------------------------------------------------------------ #
 #  Session state                                                       #
@@ -30,7 +26,6 @@ def _init():
     if "messages"   not in st.session_state:
         st.session_state.messages   = []
     if "gem_state"  not in st.session_state:
-        # Stato Gemini per-utente
         st.session_state.gem_state  = SessionState()
     if "use_engineer" not in st.session_state:
         st.session_state.use_engineer = True
@@ -40,7 +35,7 @@ def _init():
 _init()
 
 # ------------------------------------------------------------------ #
-#  Bootstrap automatico                                                #
+#  Bootstrap                                                           #
 # ------------------------------------------------------------------ #
 client = get_client()
 state: SessionState = st.session_state.gem_state
@@ -57,7 +52,7 @@ if not state.bl:
 #  Sidebar                                                             #
 # ------------------------------------------------------------------ #
 with st.sidebar:
-    st.markdown("## ✦ Gemini Chat")
+    st.markdown("## ✨ Gemini Chat")
     st.markdown("---")
 
     st.session_state.use_engineer = st.toggle(
@@ -76,7 +71,6 @@ with st.sidebar:
         st.session_state.gem_state  = SessionState()
         st.rerun()
 
-    # Status
     st.markdown("---")
     if state.bl:
         st.success("Gemini connesso ✓")
@@ -84,28 +78,29 @@ with st.sidebar:
         st.error("Non connesso")
 
 # ------------------------------------------------------------------ #
-#  Chat history                                                        #
+#  Chat                                                                #
 # ------------------------------------------------------------------ #
-st.markdown("## ✦ Gemini")
+st.markdown("## ✨ Gemini")
+
+USER_AVATAR = "🧑"
+BOT_AVATAR  = "🤖"
 
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"],
-                         avatar="🧑" if msg["role"] == "user" else "✦"):
+    avatar = USER_AVATAR if msg["role"] == "user" else BOT_AVATAR
+    with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
         if msg.get("elapsed_ms"):
-            st.caption(f"⏱ {msg['elapsed_ms']}ms"
-                       + (f"  🔧 {', '.join(msg['enhancements'])}"
-                          if msg.get("enhancements") else ""))
+            extra = ""
+            if msg.get("enhancements"):
+                extra = f"  🔧 {', '.join(msg['enhancements'])}"
+            st.caption(f"⏱ {msg['elapsed_ms']}ms{extra}")
 
-# ------------------------------------------------------------------ #
-#  Input                                                               #
-# ------------------------------------------------------------------ #
 if prompt := st.chat_input("Scrivi a Gemini…"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user", avatar="🧑"):
+    with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(prompt)
 
-    with st.chat_message("assistant", avatar="✦"):
+    with st.chat_message("assistant", avatar=BOT_AVATAR):
         placeholder = st.empty()
         placeholder.markdown("_Elaboro…_ ⏳")
 
@@ -119,19 +114,17 @@ if prompt := st.chat_input("Scrivi a Gemini…"):
             )
             elapsed = int((time.perf_counter() - t0) * 1000)
             placeholder.markdown(answer)
-            st.caption(f"⏱ {elapsed}ms"
-                       + (f"  🔧 {', '.join(tags)}" if tags else ""))
+            extra = f"  🔧 {', '.join(tags)}" if tags else ""
+            st.caption(f"⏱ {elapsed}ms{extra}")
 
             st.session_state.messages.append({
-                "role":        "assistant",
-                "content":     answer,
-                "elapsed_ms":  elapsed,
+                "role":         "assistant",
+                "content":      answer,
+                "elapsed_ms":   elapsed,
                 "enhancements": tags,
             })
-
         except RuntimeError as e:
             placeholder.error(str(e))
         except Exception as e:
             placeholder.error(f"Errore: {e}")
-            # Se sessione corrotta, reset automatico
             st.session_state.gem_state = SessionState()
