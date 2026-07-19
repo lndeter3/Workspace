@@ -20,10 +20,10 @@ st.markdown("""
 <meta name="theme-color" content="#0b0b0b">
 <style>
 #MainMenu,footer,header,.stDeployButton,[data-testid="stToolbar"]{display:none!important;}
+[data-testid="stChatInput"],[data-testid="stChatFloatingInputContainer"],.stChatFloatingInputContainer{display:none!important;}
 *{-webkit-tap-highlight-color:transparent;box-sizing:border-box;}
 html,body,.stApp{background:#0b0b0b!important;color:#eaeaea;overscroll-behavior:none;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;}
 .block-container{max-width:820px;padding:1rem 1rem 12rem;}
-[data-testid="stChatFloatingInputContainer"]{display:none!important;}
 section[data-testid="stSidebar"]{background:#0f0f0f;border-right:1px solid #1e1e1e;width:280px!important;}
 section[data-testid="stSidebar"] .stButton>button{background:#151515;border:1px solid #222;color:#eaeaea;border-radius:10px;font-weight:500;font-size:14px;}
 section[data-testid="stSidebar"] .stButton>button:hover{background:#1a1a1a;border-color:#333;}
@@ -121,54 +121,71 @@ def fmt_text_file(name,content):
  if len(lines)>MAX_TEXT_LINES:content="\n".join(lines[:MAX_TEXT_LINES]);trunc=f", truncated {len(lines)}"
  return f"\n[FILE: {name}]\n```{lang}\n{content}\n```\n"
 
-def composer(auto_tts=False,has_files=False,files_html=""):
- chips_block=f'<div id="cchips">{files_html}</div>' if has_files else ''
+if "sid" not in st.session_state:st.session_state.sid=str(uuid.uuid4())
+if "msgs" not in st.session_state:st.session_state.msgs=[]
+if "engineer" not in st.session_state:st.session_state.engineer=True
+if "complete" not in st.session_state:st.session_state.complete=True
+if "stream" not in st.session_state:st.session_state.stream=True
+if "pending" not in st.session_state:st.session_state.pending=[]
+if "upkey" not in st.session_state:st.session_state.upkey=0
+if "page" not in st.session_state:st.session_state.page="chat"
+if "auto_tts" not in st.session_state:st.session_state.auto_tts=False
+if "show_up" not in st.session_state:st.session_state.show_up=False
+if "last_msg_id" not in st.session_state:st.session_state.last_msg_id=""
+
+qp=st.query_params
+if "msg" in qp:
+ msg_txt=qp.get("msg","").strip()
+ msg_id=qp.get("mid","")
+ if msg_txt and msg_id and msg_id!=st.session_state.last_msg_id:
+  st.session_state.last_msg_id=msg_id
+  st.session_state._new_msg=msg_txt
+  st.query_params.clear()
+  st.rerun()
+
+def composer(auto_tts=False,files_html=""):
+ has_files=bool(files_html)
  return """
 <style>
- #croot{position:fixed;bottom:0;left:0;right:0;padding:12px 12px 18px;background:linear-gradient(180deg,transparent,#0b0b0b 25%);z-index:99998;pointer-events:none;}
+ #croot{position:fixed;bottom:0;left:0;right:0;padding:14px 12px 20px;background:linear-gradient(180deg,transparent,rgba(11,11,11,0.85) 30%,#0b0b0b 60%);z-index:99998;pointer-events:none;backdrop-filter:blur(8px);}
  #cwrap{max-width:820px;margin:0 auto;pointer-events:auto;}
  #cchips{margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px;}
- #cchips .cchip{display:inline-flex;align-items:center;gap:6px;background:#161616;border:1px solid #2a2a2a;border-radius:10px;padding:6px 10px;font-size:12px;color:#ccc;}
- #cchips .cchip .x{cursor:pointer;color:#666;padding:0 4px;border-radius:4px;font-weight:700;}
- #cchips .cchip .x:hover{color:#fff;background:#333;}
- #cbox{background:#141414;border:1px solid #2a2a2a;border-radius:24px;padding:8px 8px 8px 12px;display:flex;align-items:flex-end;gap:6px;box-shadow:0 8px 32px rgba(0,0,0,0.4);transition:border-color 0.15s;}
- #cbox:focus-within{border-color:#404040;}
- #cta{flex:1;background:transparent;border:none;outline:none;color:#eaeaea;font-size:15px;font-family:inherit;padding:9px 6px;resize:none;min-height:24px;max-height:200px;line-height:1.5;overflow-y:auto;}
+ .cchip{display:inline-flex;align-items:center;gap:6px;background:#161616;border:1px solid #2a2a2a;border-radius:10px;padding:6px 10px;font-size:12px;color:#ccc;}
+ #cbox{background:#141414;border:1px solid #2a2a2a;border-radius:26px;padding:6px 6px 6px 8px;display:flex;align-items:flex-end;gap:4px;box-shadow:0 10px 40px rgba(0,0,0,0.5);transition:border-color 0.15s;}
+ #cbox:focus-within{border-color:#4a4a4a;box-shadow:0 10px 40px rgba(0,0,0,0.6),0 0 0 3px rgba(139,92,246,0.08);}
+ #cta{flex:1;background:transparent;border:none;outline:none;color:#eaeaea;font-size:15px;font-family:inherit;padding:10px 8px;resize:none;min-height:24px;max-height:200px;line-height:1.5;overflow-y:auto;}
  #cta::placeholder{color:#555;}
- .cbtn{background:transparent;border:none;color:#8a8a8a;width:38px;height:38px;border-radius:50%;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:all 0.15s;flex-shrink:0;padding:0;user-select:none;-webkit-user-select:none;}
+ .cbtn{background:transparent;border:none;color:#8a8a8a;width:40px;height:40px;border-radius:50%;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:all 0.15s;flex-shrink:0;padding:0;user-select:none;-webkit-user-select:none;touch-action:manipulation;}
  .cbtn:hover{background:#1e1e1e;color:#eaeaea;}
  .cbtn:active{transform:scale(0.92);}
- .cbtn svg{width:20px;height:20px;}
+ .cbtn svg{width:20px;height:20px;pointer-events:none;}
  .cbtn.send{background:#eaeaea;color:#0b0b0b;}
- .cbtn.send:hover{background:#fff;}
+ .cbtn.send:hover{background:#fff;color:#000;}
  .cbtn.send.dis{background:#2a2a2a;color:#555;cursor:default;}
  .cbtn.send.dis:hover{background:#2a2a2a;transform:none;}
- .cbtn.rec{background:#dc2626;color:#fff;animation:crec 1.1s infinite;}
- .cbtn.rec:hover{background:#dc2626;}
- @keyframes crec{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,0.55);}70%{box-shadow:0 0 0 10px rgba(220,38,38,0);}}
- #chint{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:#1e1e1e;color:#eaeaea;padding:6px 12px;border-radius:8px;font-size:12px;white-space:nowrap;margin-bottom:6px;opacity:0;pointer-events:none;transition:opacity 0.2s;border:1px solid #333;}
- #chint.on{opacity:1;}
- #cind{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#dc2626;color:#fff;padding:6px 16px;border-radius:14px;font-size:12px;font-weight:500;z-index:100000;display:none;animation:crec 1.1s infinite;pointer-events:none;}
+ .cbtn.rec{background:#dc2626!important;color:#fff!important;animation:crec 1.1s infinite;}
+ @keyframes crec{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,0.55);}70%{box-shadow:0 0 0 12px rgba(220,38,38,0);}}
+ #cind{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#dc2626;color:#fff;padding:8px 18px;border-radius:16px;font-size:13px;font-weight:500;z-index:100000;display:none;animation:crec 1.1s infinite;pointer-events:none;letter-spacing:0.02em;}
  #cind.on{display:block;}
- #ctrans{position:fixed;top:48px;left:50%;transform:translateX(-50%);background:rgba(20,20,20,0.95);color:#eaeaea;padding:8px 14px;border-radius:10px;font-size:12px;z-index:100000;display:none;max-width:75vw;text-align:center;border:1px solid #333;pointer-events:none;}
+ #ctrans{position:fixed;top:52px;left:50%;transform:translateX(-50%);background:rgba(20,20,20,0.95);color:#eaeaea;padding:8px 14px;border-radius:10px;font-size:12px;z-index:100000;display:none;max-width:75vw;text-align:center;border:1px solid #333;pointer-events:none;}
  #ctrans.on{display:block;}
  @media (max-width:768px){
   #croot{padding:10px 10px 14px;}
-  .cbtn{width:36px;height:36px;}
-  .cbtn svg{width:18px;height:18px;}
-  #cta{font-size:16px;}
+  .cbtn{width:38px;height:38px;}
+  .cbtn svg{width:19px;height:19px;}
+  #cta{font-size:16px;padding:9px 6px;}
  }
 </style>
 <div id="cind">Listening</div>
 <div id="ctrans"></div>
 <div id="croot">
  <div id="cwrap">
-  """ + chips_block + """
+  """ + (f'<div id="cchips">{files_html}</div>' if has_files else '') + """
   <div id="cbox">
    <button id="cplus" class="cbtn" title="Attach files" aria-label="Attach">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
    </button>
-   <textarea id="cta" placeholder="Message Gemini..." rows="1"></textarea>
+   <textarea id="cta" placeholder="Message Gemini..." rows="1" autocomplete="off"></textarea>
    <button id="cvoice" class="cbtn" title="Hold to record" aria-label="Voice">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
    </button>
@@ -186,7 +203,6 @@ def composer(auto_tts=False,has_files=False,files_html=""):
  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
  const SS=window.speechSynthesis;
 
- const cbox=document.getElementById('cbox');
  const cta=document.getElementById('cta');
  const cplus=document.getElementById('cplus');
  const cvoice=document.getElementById('cvoice');
@@ -205,50 +221,34 @@ def composer(auto_tts=False,has_files=False,files_html=""):
  }
  cta.addEventListener('input',()=>{autoResize();toggleSend();});
  cta.addEventListener('keydown',(e)=>{
-  if(e.key==='Enter'&&!e.shiftKey){
-   e.preventDefault();
-   if(!csend.disabled)doSend();
-  }
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(!csend.disabled)doSend();}
  });
 
- function findStreamlitInput(){
-  const doc=window.parent?window.parent.document:document;
-  const areas=doc.querySelectorAll('textarea[data-testid="stChatInputTextArea"], .stChatInput textarea, textarea');
-  return areas[areas.length-1]||null;
- }
- function findStreamlitSend(){
-  const doc=window.parent?window.parent.document:document;
-  const btns=doc.querySelectorAll('[data-testid="stChatInputSendButton"], .stChatInput button');
-  return btns[btns.length-1]||null;
- }
- function findStreamlitPlus(){
-  const doc=window.parent?window.parent.document:document;
-  const btns=doc.querySelectorAll('button');
-  for(const b of btns){if(b.textContent.trim()==='__PLUS__')return b;}
-  return null;
- }
  function doSend(){
   const txt=cta.value.trim();
   if(!txt)return;
-  const el=findStreamlitInput();
-  if(!el){console.warn('no streamlit input');return;}
-  const setter=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;
-  setter.call(el,txt);
-  el.dispatchEvent(new Event('input',{bubbles:true}));
-  setTimeout(()=>{
-   const kev=new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true});
-   el.dispatchEvent(kev);
-   const btn=findStreamlitSend();
-   if(btn)btn.click();
-  },50);
+  const doc=window.parent?window.parent.document:document;
+  const win=window.parent||window;
+  const mid=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+  const url=new URL(win.location.href);
+  url.searchParams.set('msg',txt);
+  url.searchParams.set('mid',mid);
+  win.history.replaceState({},'',url.toString());
   cta.value='';autoResize();toggleSend();
+  win.location.reload();
  }
  csend.addEventListener('click',doSend);
 
- cplus.addEventListener('click',()=>{
-  const b=findStreamlitPlus();
-  if(b)b.click();
- });
+ function clickHidden(id){
+  const doc=window.parent?window.parent.document:document;
+  const btns=doc.querySelectorAll('button');
+  for(const b of btns){
+   const t=(b.textContent||'').trim();
+   if(t===id){b.click();return true;}
+  }
+  return false;
+ }
+ cplus.addEventListener('click',()=>{clickHidden('__PLUS__');});
 
  let bestVoices={it:null,en:null};
  function pickVoice(lang){
@@ -271,26 +271,21 @@ def composer(auto_tts=False,has_files=False,files_html=""):
   bestVoices.en=pickVoice('en-US')||pickVoice('en-GB')||pickVoice('en');
  }
  if(SS){loadVoices();SS.onvoiceschanged=loadVoices;}
-
  function detectLang(text){
   const t=text.slice(0,300).toLowerCase();
-  const itWords=[' e ',' il ',' la ',' che ',' di ',' un ',' una ',' per ',' con ',' non ',' sono ',' è ',' più ',' molto ',' quando ',' come ',' cosa ',' anche ',' gli ',' nel '];
-  let s=0;itWords.forEach(w=>{if(t.includes(w))s++;});
+  const w=[' e ',' il ',' la ',' che ',' di ',' un ',' una ',' per ',' con ',' non ',' sono ',' è ',' più ',' come ',' cosa ',' anche '];
+  let s=0;w.forEach(x=>{if(t.includes(x))s++;});
   return s>=2?'it':'en';
  }
  let speaking=false;
  function stopSpeak(){if(SS){try{SS.cancel();}catch(e){}}speaking=false;}
  function speak(text){
-  if(!SS||!text)return;
-  stopSpeak();
+  if(!SS||!text)return;stopSpeak();
   const clean=text.replace(/```[\\s\\S]*?```/g,'').replace(/`[^`]+`/g,'').replace(/\\*\\*/g,'').replace(/[*_#>~|]/g,'').replace(/https?:\\/\\/\\S+/g,'').replace(/\\[([^\\]]+)\\]\\([^\\)]+\\)/g,'$1').replace(/\\s+/g,' ').trim();
   if(!clean)return;
   const sentences=clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g)||[clean];
   const chunks=[];let buf='';
-  for(const s of sentences){
-   if((buf+s).length>200){if(buf)chunks.push(buf.trim());buf=s;}
-   else buf+=' '+s;
-  }
+  for(const s of sentences){if((buf+s).length>200){if(buf)chunks.push(buf.trim());buf=s;}else buf+=' '+s;}
   if(buf.trim())chunks.push(buf.trim());
   const lang=detectLang(clean);
   const voice=bestVoices[lang]||bestVoices.it||bestVoices.en;
@@ -301,8 +296,7 @@ def composer(auto_tts=False,has_files=False,files_html=""):
    if(voice)u.voice=voice;
    u.lang=voice?voice.lang:(lang==='it'?'it-IT':'en-US');
    u.rate=1.02;u.pitch=1.0;u.volume=1.0;
-   u.onend=()=>{idx++;next();};
-   u.onerror=()=>{idx++;next();};
+   u.onend=()=>{idx++;next();};u.onerror=()=>{idx++;next();};
    SS.speak(u);
   }
   next();
@@ -318,22 +312,18 @@ def composer(auto_tts=False,has_files=False,files_html=""):
   try{
    rec=new SR();
    rec.lang=navigator.language||'it-IT';
-   rec.continuous=true;
-   rec.interimResults=true;
+   rec.continuous=true;rec.interimResults=true;
    accText=cta.value;
    if(accText&&!accText.endsWith(' '))accText+=' ';
    rec.onstart=()=>{
-    recording=true;
-    cvoice.classList.add('rec');
-    cind.classList.add('on');
+    recording=true;cvoice.classList.add('rec');cind.classList.add('on');
     if(navigator.vibrate)navigator.vibrate(20);
    };
    rec.onresult=(e)=>{
     let interim='',final='';
     for(let i=e.resultIndex;i<e.results.length;i++){
      const t=e.results[i][0].transcript;
-     if(e.results[i].isFinal)final+=t;
-     else interim+=t;
+     if(e.results[i].isFinal)final+=t;else interim+=t;
     }
     if(final)accText+=final+' ';
     cta.value=(accText+interim).trim();
@@ -347,62 +337,40 @@ def composer(auto_tts=False,has_files=False,files_html=""):
  }
  function stopRec(){
   if(rec){try{rec.stop();}catch(e){}rec=null;}
-  recording=false;
-  cvoice.classList.remove('rec');
-  cind.classList.remove('on');
+  recording=false;cvoice.classList.remove('rec');cind.classList.remove('on');
   setTimeout(()=>ctrans.classList.remove('on'),600);
   if(navigator.vibrate)navigator.vibrate(15);
  }
 
- let pressTimer=null,longPressed=false;
- function pressStart(e){
-  longPressed=false;
-  pressTimer=setTimeout(()=>{longPressed=true;startRec();},350);
- }
- function pressEnd(e){
-  if(pressTimer){clearTimeout(pressTimer);pressTimer=null;}
-  if(longPressed&&recording){stopRec();longPressed=false;setTimeout(()=>{longPressed=false;},100);}
- }
- function pressCancel(){
-  if(pressTimer){clearTimeout(pressTimer);pressTimer=null;}
- }
- cvoice.addEventListener('mousedown',pressStart);
- cvoice.addEventListener('touchstart',pressStart,{passive:true});
- cvoice.addEventListener('mouseup',pressEnd);
- cvoice.addEventListener('touchend',pressEnd);
- cvoice.addEventListener('mouseleave',pressCancel);
- cvoice.addEventListener('touchcancel',pressCancel);
+ let pt=null,lp=false;
+ function ps(){lp=false;pt=setTimeout(()=>{lp=true;startRec();},350);}
+ function pe(){if(pt){clearTimeout(pt);pt=null;}if(lp&&recording){setTimeout(()=>stopRec(),80);setTimeout(()=>{lp=false;},150);}}
+ function pc(){if(pt){clearTimeout(pt);pt=null;}}
+ cvoice.addEventListener('mousedown',ps);
+ cvoice.addEventListener('touchstart',ps,{passive:true});
+ cvoice.addEventListener('mouseup',pe);
+ cvoice.addEventListener('touchend',pe);
+ cvoice.addEventListener('mouseleave',pc);
+ cvoice.addEventListener('touchcancel',pc);
  cvoice.addEventListener('click',(e)=>{
-  if(longPressed){e.preventDefault();e.stopPropagation();return;}
+  if(lp){e.preventDefault();e.stopPropagation();return;}
   if(recording)stopRec();else{
    ctrans.textContent='Hold to record';ctrans.classList.add('on');
-   setTimeout(()=>ctrans.classList.remove('on'),1000);
+   setTimeout(()=>ctrans.classList.remove('on'),900);
   }
  });
 
- let sendPressTimer=null,sendLongPressed=false;
- csend.addEventListener('mousedown',()=>{
-  if(csend.disabled){
-   sendLongPressed=false;
-   sendPressTimer=setTimeout(()=>{sendLongPressed=true;startRec();},350);
-  }
- });
- csend.addEventListener('touchstart',()=>{
-  if(csend.disabled){
-   sendLongPressed=false;
-   sendPressTimer=setTimeout(()=>{sendLongPressed=true;startRec();},350);
-  }
- },{passive:true});
- const clearSend=()=>{
-  if(sendPressTimer){clearTimeout(sendPressTimer);sendPressTimer=null;}
-  if(sendLongPressed&&recording){setTimeout(()=>stopRec(),100);sendLongPressed=false;}
- };
- csend.addEventListener('mouseup',clearSend);
- csend.addEventListener('touchend',clearSend);
- csend.addEventListener('mouseleave',()=>{if(sendPressTimer){clearTimeout(sendPressTimer);sendPressTimer=null;}});
+ let spt=null,slp=false;
+ function sps(){if(csend.disabled){slp=false;spt=setTimeout(()=>{slp=true;startRec();},350);}}
+ function spe(){if(spt){clearTimeout(spt);spt=null;}if(slp&&recording){setTimeout(()=>stopRec(),80);setTimeout(()=>{slp=false;},150);}}
+ csend.addEventListener('mousedown',sps);
+ csend.addEventListener('touchstart',sps,{passive:true});
+ csend.addEventListener('mouseup',spe);
+ csend.addEventListener('touchend',spe);
+ csend.addEventListener('mouseleave',()=>{if(spt){clearTimeout(spt);spt=null;}});
 
  window.addEventListener('beforeunload',()=>{stopSpeak();stopRec();});
- setTimeout(()=>cta.focus(),200);
+ setTimeout(()=>cta.focus(),300);
 })();
 </script>
 """
@@ -429,11 +397,11 @@ def tts_inline(text,auto=False,key=""):
  const pl=document.getElementById('pl_{key}');
  const stp=document.getElementById('stp_{key}');
  function play(){{
-  const fn=window.parent&&window.parent.__gemini_speak||window.__gemini_speak;
+  const fn=(window.parent&&window.parent.__gemini_speak)||window.__gemini_speak;
   if(fn){{fn(txt);pl.style.display='none';stp.style.display='inline-flex';}}
  }}
  function stop(){{
-  const fn=window.parent&&window.parent.__gemini_stop_speak||window.__gemini_stop_speak;
+  const fn=(window.parent&&window.parent.__gemini_stop_speak)||window.__gemini_stop_speak;
   if(fn)fn();
   pl.style.display='inline-flex';stp.style.display='none';
  }}
@@ -442,17 +410,6 @@ def tts_inline(text,auto=False,key=""):
 }})();
 </script>
 """
-
-if "sid" not in st.session_state:st.session_state.sid=str(uuid.uuid4())
-if "msgs" not in st.session_state:st.session_state.msgs=[]
-if "engineer" not in st.session_state:st.session_state.engineer=True
-if "complete" not in st.session_state:st.session_state.complete=True
-if "stream" not in st.session_state:st.session_state.stream=True
-if "pending" not in st.session_state:st.session_state.pending=[]
-if "upkey" not in st.session_state:st.session_state.upkey=0
-if "page" not in st.session_state:st.session_state.page="chat"
-if "auto_tts" not in st.session_state:st.session_state.auto_tts=False
-if "show_up" not in st.session_state:st.session_state.show_up=False
 
 ok,h=health()
 
@@ -473,6 +430,7 @@ with st.sidebar:
    st.session_state.msgs=[]
    st.session_state.pending=[]
    st.session_state.upkey+=1
+   st.session_state.last_msg_id=""
    st.rerun()
   st.markdown("**Options**")
   st.session_state.engineer=st.toggle("Prompt engineer",value=st.session_state.engineer)
@@ -516,6 +474,7 @@ else:
  if not ok:
   st.error(f"API offline: {API_BASE}")
   st.stop()
+
  if not st.session_state.msgs:
   st.markdown("""<div class='hero'>
    <h1>Come posso aiutarti oggi?</h1>
@@ -532,22 +491,18 @@ else:
    if m["role"]=="assistant" and m.get("content"):
     components.html(tts_inline(m["content"],auto=False,key=f"m{i}"),height=42)
 
- files_html=""
- if st.session_state.pending:
-  parts=[]
-  for i,f in enumerate(st.session_state.pending):
-   tag="IMG" if f["kind"]=="image" else "TXT" if f["kind"]=="text" else "BIN"
-   nm=f["name"][:24]+("..." if len(f["name"])>24 else "")
-   parts.append(f"<span class='cchip'>[{tag}] {nm} · {f['size']/1024:.0f}KB</span>")
-  files_html="".join(parts)
+ with st.container():
+  cc=st.columns([1,100])
+  with cc[0]:
+   if st.button("__PLUS__",key="plus_hidden"):
+    st.session_state.show_up=not st.session_state.show_up
+    st.rerun()
 
- components.html(composer(auto_tts=st.session_state.auto_tts,has_files=bool(files_html),files_html=files_html),height=140)
-
- col1,col2=st.columns([1,20])
- with col1:
-  if st.button("__PLUS__",key="plus_hidden",help="internal"):
-   st.session_state.show_up=not st.session_state.show_up
-   st.rerun()
+ st.markdown("<style>[data-testid='column']:has(button:contains('__PLUS__')){position:absolute;left:-9999px;}</style>",unsafe_allow_html=True)
+ st.markdown("""<style>
+ div[data-testid="stHorizontalBlock"]:has(button[kind="secondary"]:where(:not([data-testid]))) button:where(*):is([data-testid="baseButton-secondary"]) {display:none;}
+ button[kind="secondary"]:has-text("__PLUS__"){position:fixed;left:-9999px;top:-9999px;}
+ </style>""",unsafe_allow_html=True)
 
  if st.session_state.show_up:
   with st.expander("Attach files",expanded=True):
@@ -574,9 +529,18 @@ else:
     if ac2.button("Clear all",use_container_width=True,key="clr_up"):
      st.session_state.pending=[];st.session_state.upkey+=1;st.session_state.show_up=False;st.rerun()
 
- st.markdown("<div style='position:absolute;left:-9999px;'>",unsafe_allow_html=True)
- q=st.chat_input("hidden")
- st.markdown("</div>",unsafe_allow_html=True)
+ files_html=""
+ if st.session_state.pending:
+  parts=[]
+  for f in st.session_state.pending:
+   tag="IMG" if f["kind"]=="image" else "TXT" if f["kind"]=="text" else "BIN"
+   nm=f["name"][:24]+("..." if len(f["name"])>24 else "")
+   parts.append(f"<span class='cchip'>[{tag}] {nm} · {f['size']/1024:.0f}KB</span>")
+  files_html="".join(parts)
+
+ components.html(composer(auto_tts=st.session_state.auto_tts,files_html=files_html),height=160)
+
+ q=st.session_state.pop("_new_msg",None)
 
  if q:
   attached=list(st.session_state.pending)
@@ -650,5 +614,6 @@ else:
      components.html(tts_inline(final_ans,auto=st.session_state.auto_tts,key=f"live_{len(st.session_state.msgs)}"),height=42)
     st.session_state.pending=[]
     st.session_state.upkey+=1
+    st.rerun()
    except Exception as e:
     info.empty();box.error(str(e));api_clear_uploads(st.session_state.sid)
