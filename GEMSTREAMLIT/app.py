@@ -1,36 +1,7 @@
-import uuid,time,streamlit as st,sys,os,traceback,json
-sys.path.insert(0,os.path.dirname(__file__))
-from core.client import GeminiClient
-from core.session import SessionState
+import uuid,time,streamlit as st,os,traceback,json,requests
 st.set_page_config(page_title="Gemini",page_icon="✨",layout="wide",initial_sidebar_state="expanded")
-qp=st.query_params
-API_MODE=("q" in qp) or (qp.get("mode")=="api")
-if API_MODE:
- st.markdown("<style>#MainMenu,footer,header,section[data-testid='stSidebar'],[data-testid='stToolbar']{display:none!important;}.block-container{padding:0!important;max-width:100%!important;}.stApp{background:#0a0a0a;}</style>",unsafe_allow_html=True)
- t0=time.perf_counter()
- q=qp.get("q","").strip()
- sid=qp.get("session_id","") or qp.get("sid","")
- use_eng=qp.get("engineer","true").lower() not in("false","0","no")
- use_fc=qp.get("complete","true").lower() not in("false","0","no")
- result={}
- if not q:
-  result={"status":"error","error":"Missing 'q' parameter","usage":"?q=your+question&session_id=optional"}
- else:
-  try:
-   if "api_sessions" not in st.session_state:st.session_state.api_sessions={}
-   if sid and sid in st.session_state.api_sessions:state=st.session_state.api_sessions[sid]
-   else:
-    state=SessionState()
-    if not sid:sid=str(uuid.uuid4())
-    st.session_state.api_sessions[sid]=state
-   client=GeminiClient()
-   if not state.bl:client.bootstrap(state)
-   ans,tags=client.chat(message=q,state=state,use_engineer=use_eng,force_complete=use_fc)
-   result={"status":"success","answer":ans,"session_id":sid,"enhancements":tags,"elapsed_ms":int((time.perf_counter()-t0)*1000)}
-  except Exception as e:
-   result={"status":"error","error":str(e),"elapsed_ms":int((time.perf_counter()-t0)*1000)}
- st.code(json.dumps(result,ensure_ascii=False,indent=2),language="json")
- st.stop()
+API_BASE="https://web-production-3d4e4.up.railway.app"
+API_TIMEOUT=90
 CSS="""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -57,8 +28,6 @@ section[data-testid="stSidebar"] .stButton>button:hover{background:rgba(139,92,2
 .stTabs [data-baseweb="tab-list"]{gap:0;background:rgba(255,255,255,0.02);border-radius:12px;padding:4px;}
 .stTabs [data-baseweb="tab"]{background:transparent;border-radius:10px;color:#888;font-weight:500;padding:8px 20px;border:none;}
 .stTabs [aria-selected="true"]{background:rgba(139,92,246,0.15)!important;color:#c4b5fd!important;}
-[data-testid="stFileUploader"]{background:rgba(255,255,255,0.02);border:1px dashed rgba(255,255,255,0.1);border-radius:14px;padding:10px;}
-[data-testid="stFileUploader"] button{background:rgba(139,92,246,0.1)!important;color:#c4b5fd!important;border:none!important;border-radius:8px!important;}
 .stToggle label{color:#ccc!important;font-size:14px;}
 .hero{text-align:center;padding:5rem 1rem 2rem;}
 .hero-icon{font-size:3.5rem;margin-bottom:1rem;filter:drop-shadow(0 0 20px rgba(139,92,246,0.4));}
@@ -71,6 +40,7 @@ section[data-testid="stSidebar"] .stButton>button:hover{background:rgba(139,92,2
 .api-card:hover{border-color:rgba(139,92,246,0.2);}
 .api-method{display:inline-block;padding:4px 12px;border-radius:6px;font-weight:700;font-size:12px;font-family:'JetBrains Mono',monospace;}
 .api-get{background:rgba(16,185,129,0.15);color:#34d399;}
+.api-delete{background:rgba(239,68,68,0.15);color:#f87171;}
 .api-url{color:#e8e8e8;font-family:'JetBrains Mono',monospace;font-size:14px;margin-left:10px;}
 .api-desc{color:#888;font-size:14px;margin-top:8px;}
 .api-param{display:grid;grid-template-columns:120px 80px 1fr;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:13px;}
@@ -85,51 +55,44 @@ section[data-testid="stSidebar"] .stButton>button:hover{background:rgba(139,92,2
 .status-on{background:#10a37f;box-shadow:0 0 6px #10a37f;}
 .status-off{background:#ef4444;}
 .section-title{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;color:#555;margin:24px 0 12px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.04);}
-.warn-box{background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);border-radius:12px;padding:16px;margin:16px 0;color:#fbbf24;font-size:13px;}
+.suggest-btn{background:rgba(255,255,255,0.03)!important;border:1px solid rgba(255,255,255,0.06)!important;border-radius:14px!important;padding:16px!important;text-align:left!important;font-size:13px!important;color:#c0c0c0!important;transition:all .2s!important;}
+.suggest-btn:hover{background:rgba(139,92,246,0.08)!important;border-color:rgba(139,92,246,0.2)!important;color:#e8e8e8!important;}
 ::-webkit-scrollbar{width:6px;height:6px;}
 ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:3px;}
 </style>
 """
 st.markdown(CSS,unsafe_allow_html=True)
-TEXT_EXT={".txt",".md",".csv",".json",".py",".js",".ts",".jsx",".tsx",".html",".css",".xml",".yaml",".yml",".sh",".sql",".c",".cpp",".h",".hpp",".java",".kt",".go",".rs",".rb",".php",".toml",".ini",".log",".env"}
-IMG_EXT={".png",".jpg",".jpeg",".webp",".gif",".bmp"}
-LANG_MAP={"py":"python","js":"javascript","ts":"typescript","sh":"bash","cpp":"cpp","c":"c","java":"java","go":"go","rs":"rust","rb":"ruby","php":"php","sql":"sql","html":"html","css":"css","json":"json","yaml":"yaml","yml":"yaml","toml":"toml","xml":"xml","md":"markdown"}
-def is_text(n,m):
- e=os.path.splitext(n)[1].lower()
- return e in TEXT_EXT or(m and(m.startswith("text/") or m in("application/json","application/xml")))
-def is_image(n,m):
- e=os.path.splitext(n)[1].lower()
- return e in IMG_EXT or(m and m.startswith("image/"))
-def read_text(data,name):
- for enc in["utf-8","latin-1","cp1252"]:
-  try:return data.decode(enc,errors="replace")
-  except:continue
- return data.decode("utf-8",errors="replace")
-def fmt_file(name,content):
- ext=os.path.splitext(name)[1].lower().lstrip(".")
- lang=LANG_MAP.get(ext,ext)
- lines=content.split("\n")
- trunc=""
- if len(lines)>5000:content="\n".join(lines[:5000]);trunc=f", truncated {len(lines)}"
- return f"\n[FILE: {name}]\n```{lang}\n{content}\n```\n"
-@st.cache_resource
-def gc():return GeminiClient()
+@st.cache_data(ttl=30)
+def check_api():
+ try:
+  r=requests.get(f"{API_BASE}/health",timeout=5)
+  return r.status_code==200,r.json() if r.status_code==200 else {}
+ except:return False,{}
+def api_ask(question,session_id="",engineer=True,complete=True):
+ try:
+  params={"q":question,"engineer":str(engineer).lower(),"complete":str(complete).lower()}
+  if session_id:params["session_id"]=session_id
+  r=requests.get(f"{API_BASE}/ask",params=params,timeout=API_TIMEOUT)
+  data=r.json()
+  if r.status_code==200 and data.get("status")=="success":return data
+  raise RuntimeError(data.get("error",f"HTTP {r.status_code}"))
+ except requests.Timeout:raise RuntimeError(f"Timeout dopo {API_TIMEOUT}s")
+ except requests.ConnectionError:raise RuntimeError("API non raggiungibile")
+def api_reset(session_id):
+ try:requests.post(f"{API_BASE}/session/{session_id}/reset",timeout=5)
+ except:pass
+def api_delete(session_id):
+ try:requests.delete(f"{API_BASE}/session/{session_id}",timeout=5)
+ except:pass
 def _i():
- for k,v in[("sid",str(uuid.uuid4())),("msg",[]),("gs",SessionState()),("eng",True),("fc",True),("pending",[]),("upk",0),("debug",False),("page","chat")]:
+ for k,v in[("sid",str(uuid.uuid4())),("msg",[]),("eng",True),("fc",True),("page","chat")]:
   if k not in st.session_state:st.session_state[k]=v
 _i()
-cl=gc()
-gs=st.session_state.gs
-if not gs.bl:
- with st.spinner("⚡"):
-  try:cl.bootstrap(gs)
-  except Exception as e:st.error(f"Bootstrap: {e}");st.stop()
-try:BASE_URL="https://"+st.context.headers.get("host","sqxm2q7rdoyeglk8rbuqxm.streamlit.app")
-except:BASE_URL="https://sqxm2q7rdoyeglk8rbuqxm.streamlit.app"
+online,health=check_api()
 with st.sidebar:
  st.markdown("""<div style='padding:12px 4px 24px;'>
   <div style='font-size:22px;font-weight:700;background:linear-gradient(135deg,#8B5CF6,#EC4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent;'>✨ Gemini</div>
-  <div style='color:#555;font-size:11px;margin-top:4px;font-family:JetBrains Mono,monospace;'>v14 · Chat + API</div>
+  <div style='color:#555;font-size:11px;margin-top:4px;font-family:JetBrains Mono,monospace;'>v15 · Cloud API</div>
  </div>""",unsafe_allow_html=True)
  c1,c2=st.columns(2)
  if c1.button("💬 Chat",use_container_width=True,type="primary" if st.session_state.page=="chat" else "secondary"):st.session_state.page="chat";st.rerun()
@@ -137,102 +100,150 @@ with st.sidebar:
  if st.session_state.page=="chat":
   st.markdown("")
   if st.button("＋ Nuova chat",use_container_width=True):
-   st.session_state.sid=str(uuid.uuid4());st.session_state.msg=[];st.session_state.gs=SessionState();st.session_state.pending=[];st.session_state.upk+=1;st.rerun()
+   api_delete(st.session_state.sid)
+   st.session_state.sid=str(uuid.uuid4())
+   st.session_state.msg=[]
+   st.rerun()
   st.markdown("<div class='section-title'>Impostazioni</div>",unsafe_allow_html=True)
   st.session_state.eng=st.toggle("🔧 Prompt Engineer",value=st.session_state.eng)
   st.session_state.fc=st.toggle("📝 Auto-completa",value=st.session_state.fc)
-  st.session_state.debug=st.toggle("🐛 Debug",value=st.session_state.debug)
-  st.markdown("<div class='section-title'>📎 Allegati</div>",unsafe_allow_html=True)
-  up=st.file_uploader("Upload",type=["png","jpg","jpeg","webp","gif","bmp","txt","md","csv","json","py","js","html","css","yaml","yml","sh","sql","c","cpp","java","go","rs","toml","log"],accept_multiple_files=True,key=f"up_{st.session_state.upk}",label_visibility="collapsed")
-  if up:
-   existing={(x["name"],x["size"]) for x in st.session_state.pending}
-   for f in up:
-    if(f.name,f.size) not in existing:
-     mime=f.type or ""
-     kind="text" if is_text(f.name,mime) else "image" if is_image(f.name,mime) else "binary"
-     st.session_state.pending.append({"name":f.name,"size":f.size,"bytes":f.getvalue(),"mime":mime,"kind":kind})
-  if st.session_state.pending:
-   for i,f in enumerate(st.session_state.pending):
-    c1,c2=st.columns([5,1])
-    ic={"image":"🖼","text":"📝","binary":"📦"}.get(f["kind"],"📄")
-    c1.markdown(f"<div class='chip'>{ic} {f['name'][:20]}{'…' if len(f['name'])>20 else ''}</div>",unsafe_allow_html=True)
-    if c2.button("✕",key=f"rm_{i}"):st.session_state.pending.pop(i);st.rerun()
- dot="status-on" if gs.bl else "status-off"
+  if st.button("🔄 Reset contesto",use_container_width=True):
+   api_reset(st.session_state.sid)
+   st.toast("Contesto resettato")
+ dot="status-on" if online else "status-off"
+ sess_count=health.get("sessions",0) if online else 0
  st.markdown(f"""<div style='position:absolute;bottom:16px;left:16px;right:16px;'>
-  <div class='status-pill {"status-online" if gs.bl else "status-offline"}'><span class='status-dot {dot}'></span>{"Online" if gs.bl else "Offline"}</div>
+  <div class='status-pill {"status-online" if online else "status-offline"}'><span class='status-dot {dot}'></span>{"API Online" if online else "API Offline"}</div>
+  <div style='color:#555;font-size:10px;margin-top:6px;font-family:JetBrains Mono,monospace;'>
+   {sess_count} sessioni attive<br>
+   {st.session_state.sid[:20]}
+  </div>
  </div>""",unsafe_allow_html=True)
 if st.session_state.page=="api":
- st.markdown("""<div style='padding:2rem 0 1rem;'>
-  <h1 style='font-size:2rem;font-weight:700;background:linear-gradient(135deg,#8B5CF6,#EC4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:0;'>⚡ API Reference</h1>
-  <p style='color:#666;font-size:14px;margin-top:8px;'>Chiama Gemini direttamente via HTTP GET. Nessuna API key.</p>
+ st.markdown(f"""<div style='padding:2rem 0 1rem;'>
+  <div class='status-pill {"status-online" if online else "status-offline"}' style='margin-bottom:16px;'><span class='status-dot {"status-on" if online else "status-off"}'></span>{"ONLINE" if online else "OFFLINE"}</div>
+  <h1 style='font-size:2.2rem;font-weight:700;background:linear-gradient(135deg,#8B5CF6,#EC4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:0;'>⚡ API Reference</h1>
+  <p style='color:#666;font-size:14px;margin-top:8px;'>Free · No auth · No API key · Powered by Railway</p>
+  <div style='margin-top:12px;padding:12px 16px;background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);border-radius:10px;font-family:JetBrains Mono,monospace;font-size:13px;color:#c4b5fd;'>{API_BASE}</div>
  </div>""",unsafe_allow_html=True)
  st.markdown(f"""<div class='api-card'>
-  <div><span class='api-method api-get'>GET</span><span class='api-url'>{BASE_URL}/?q=YOUR_QUESTION</span></div>
-  <div class='api-desc'>Ritorna JSON con la risposta di Gemini. Parse con regex o BeautifulSoup lato client (vedi esempi).</div>
+  <div><span class='api-method api-get'>GET</span><span class='api-url'>/ask</span></div>
+  <div class='api-desc'>Chiedi qualsiasi cosa a Gemini. Ritorna JSON con la risposta.</div>
   <div style='margin-top:20px;'>
    <div style='color:#888;font-size:12px;font-weight:600;margin-bottom:8px;'>QUERY PARAMS</div>
    <div class='api-param'><span class='api-param-name'>q<span class='api-required'>*</span></span><span class='api-param-type'>string</span><span class='api-param-desc'>Domanda per Gemini (URL-encoded)</span></div>
-   <div class='api-param'><span class='api-param-name'>session_id</span><span class='api-param-type'>string</span><span class='api-param-desc'>Mantiene il contesto tra chiamate</span></div>
+   <div class='api-param'><span class='api-param-name'>session_id</span><span class='api-param-type'>string</span><span class='api-param-desc'>ID sessione per mantenere il contesto</span></div>
    <div class='api-param'><span class='api-param-name'>engineer</span><span class='api-param-type'>bool</span><span class='api-param-desc'>Prompt engineering (default: true)</span></div>
    <div class='api-param'><span class='api-param-name'>complete</span><span class='api-param-type'>bool</span><span class='api-param-desc'>Auto-completa liste (default: true)</span></div>
   </div>
  </div>""",unsafe_allow_html=True)
- st.markdown("""<div class='warn-box'>⚠ <b>Nota tecnica:</b> Streamlit non è un vero server API, quindi la risposta è HTML con il JSON dentro un &lt;code&gt;. Usa gli helper qui sotto per estrarlo.</div>""",unsafe_allow_html=True)
+ st.markdown(f"""<div class='api-card'>
+  <div><span class='api-method api-get'>GET</span><span class='api-url'>/health</span></div>
+  <div class='api-desc'>Status server e conteggio sessioni attive</div>
+ </div>
+ <div class='api-card'>
+  <div><span class='api-method api-get'>GET</span><span class='api-url'>/sessions</span></div>
+  <div class='api-desc'>Lista sessioni attive (max 50)</div>
+ </div>
+ <div class='api-card'>
+  <div><span class='api-method api-delete'>DELETE</span><span class='api-url'>/session/{{sid}}</span></div>
+  <div class='api-desc'>Cancella una sessione</div>
+ </div>""",unsafe_allow_html=True)
  tab1,tab2,tab3,tab4=st.tabs(["🐍 Python","🌐 JavaScript","🔧 cURL","📦 Response"])
  with tab1:
-  st.code(f'''import requests, re, json
+  st.code(f'''import requests
 
-def ask_gemini(question, session_id=None, base="{BASE_URL}"):
-    """Chiama Gemini via URL query e ritorna dict."""
-    params = {{"q": question}}
-    if session_id: params["session_id"] = session_id
-    r = requests.get(base, params=params, timeout=60)
-    # Estrai JSON dall'HTML di Streamlit
-    m = re.search(r'<code[^>]*>(\\{{[^<]+\\}})</code>', r.text, re.DOTALL)
-    if not m:
-        # Fallback: cerca pre>code
-        m = re.search(r'<pre[^>]*><code[^>]*>(\\{{.*?\\}})</code></pre>', r.text, re.DOTALL)
-    if not m:
-        raise Exception("JSON non trovato nella risposta")
-    return json.loads(m.group(1))
+API = "{API_BASE}"
 
-# USO
-data = ask_gemini("Ciao come stai?")
+# Semplice
+r = requests.get(f"{{API}}/ask", params={{"q": "Ciao come stai?"}})
+data = r.json()
 print(data["answer"])
 print(f"Tempo: {{data['elapsed_ms']}}ms")
 
-# Conversazione multi-turno
-sid = "my-session-1"
-data1 = ask_gemini("Ciao, mi chiamo Andrea", sid)
-data2 = ask_gemini("Come mi chiamo?", sid)
-print(data2["answer"])''',language="python")
+# Multi-turno con session_id
+sid = data["session_id"]
+r2 = requests.get(f"{{API}}/ask", params={{
+    "q": "Cosa mi hai detto prima?",
+    "session_id": sid
+}})
+print(r2.json()["answer"])''',language="python")
+  st.code(f'''# Classe wrapper con context management
+import requests
+from uuid import uuid4
+
+class Gemini:
+    def __init__(self, api="{API_BASE}"):
+        self.api = api
+        self.sid = str(uuid4())
+    
+    def ask(self, question, **kwargs):
+        r = requests.get(f"{{self.api}}/ask", params={{
+            "q": question, "session_id": self.sid, **kwargs
+        }}, timeout=90)
+        return r.json()
+    
+    def reset(self):
+        requests.post(f"{{self.api}}/session/{{self.sid}}/reset")
+    
+    def clear(self):
+        requests.delete(f"{{self.api}}/session/{{self.sid}}")
+        self.sid = str(uuid4())
+
+# Uso
+gem = Gemini()
+print(gem.ask("Ciao!")["answer"])
+print(gem.ask("Come mi chiamo?")["answer"])''',language="python")
  with tab2:
-  st.code(f'''async function askGemini(question, sessionId = null) {{
-  const url = new URL("{BASE_URL}/");
-  url.searchParams.set("q", question);
-  if (sessionId) url.searchParams.set("session_id", sessionId);
-  const r = await fetch(url);
-  const html = await r.text();
-  // Estrai JSON dal blocco <code>
-  const match = html.match(/<code[^>]*>(\\{{[\\s\\S]+?\\}})<\\/code>/);
-  if (!match) throw new Error("JSON non trovato");
-  return JSON.parse(match[1]);
+  st.code(f'''const API = "{API_BASE}";
+
+// Chiamata base
+const r = await fetch(`${{API}}/ask?q=${{encodeURIComponent("Ciao!")}}`);
+const data = await r.json();
+console.log(data.answer);''',language="javascript")
+  st.code(f'''// Classe wrapper
+class Gemini {{
+  constructor(api = "{API_BASE}") {{
+    this.api = api;
+    this.sid = crypto.randomUUID();
+  }}
+  
+  async ask(question, opts = {{}}) {{
+    const url = new URL(this.api + "/ask");
+    url.searchParams.set("q", question);
+    url.searchParams.set("session_id", this.sid);
+    Object.entries(opts).forEach(([k,v]) => url.searchParams.set(k, v));
+    const r = await fetch(url);
+    return await r.json();
+  }}
+  
+  async reset() {{
+    await fetch(`${{this.api}}/session/${{this.sid}}/reset`, {{method:"POST"}});
+  }}
 }}
 
-// USO
-const data = await askGemini("Cos'è il quantum computing?");
-console.log(data.answer);''',language="javascript")
+const gem = new Gemini();
+const {{answer}} = await gem.ask("Cos'è il quantum computing?");
+console.log(answer);''',language="javascript")
  with tab3:
-  st.code(f'''# Chiamata base
-curl "{BASE_URL}/?q=Ciao+come+stai"
+  st.code(f'''# Base
+curl "{API_BASE}/ask?q=Ciao+come+stai"
 
-# Con jq per estrarre il JSON
-curl -s "{BASE_URL}/?q=Ciao" | grep -oP '<code[^>]*>\\K[^<]+' | head -1 | jq
+# Con jq per estrarre solo la risposta
+curl -s "{API_BASE}/ask?q=Ciao" | jq -r '.answer'
 
-# Con Python one-liner
-curl -s "{BASE_URL}/?q=Ciao" | python -c "import sys,re,json; m=re.search(r'<code[^>]*>({{[^<]+}})</code>',sys.stdin.read()); print(json.loads(m.group(1))['answer'])"''',language="bash")
+# Multi-turno
+SID="my-session-123"
+curl "{API_BASE}/ask?q=Ciao&session_id=$SID"
+curl "{API_BASE}/ask?q=Come+mi+chiamo?&session_id=$SID"
+
+# Health check
+curl "{API_BASE}/health"
+
+# Cancella sessione
+curl -X DELETE "{API_BASE}/session/$SID"''',language="bash")
  with tab4:
-  st.code(json.dumps({"status":"success","answer":"Ciao! Sto benissimo, grazie. Come posso aiutarti?","session_id":"abc-123","enhancements":[],"elapsed_ms":3420},indent=2,ensure_ascii=False),language="json")
+  st.code(json.dumps({"status":"success","answer":"Ciao! Sto benissimo, grazie...","session_id":"abc-123-def","enhancements":[],"elapsed_ms":3420},indent=2,ensure_ascii=False),language="json")
   st.markdown("""<div style='margin-top:16px;'>
    <div class='api-param'><span class='api-param-name'>status</span><span class='api-param-type'>str</span><span class='api-param-desc'>"success" o "error"</span></div>
    <div class='api-param'><span class='api-param-name'>answer</span><span class='api-param-type'>str</span><span class='api-param-desc'>Risposta Gemini (markdown)</span></div>
@@ -242,95 +253,68 @@ curl -s "{BASE_URL}/?q=Ciao" | python -c "import sys,re,json; m=re.search(r'<cod
   </div>""",unsafe_allow_html=True)
  st.markdown("<h3 style='color:#e8e8e8;font-size:18px;font-weight:600;margin-top:32px;'>🧪 Live Playground</h3>",unsafe_allow_html=True)
  pc1,pc2=st.columns([3,1])
- test_q=pc1.text_input("Domanda",value="Dimmi una curiosità sui polpi",label_visibility="collapsed")
+ test_q=pc1.text_input("Domanda",value="Dimmi una curiosità sui polpi",label_visibility="collapsed",placeholder="Scrivi una domanda...")
  test_go=pc2.button("▶ Prova",use_container_width=True,type="primary")
  if test_go and test_q:
-  st.markdown(f"<div style='color:#666;font-size:12px;margin:8px 0;'>Chiamando: <code>{BASE_URL}/?q={test_q.replace(' ','+')[:60]}...</code></div>",unsafe_allow_html=True)
-  with st.spinner("⚡ In corso..."):
-   t0=time.perf_counter()
+  st.markdown(f"<div style='color:#666;font-size:12px;margin:8px 0;font-family:JetBrains Mono,monospace;'>GET {API_BASE}/ask?q={test_q[:60].replace(' ','+')}</div>",unsafe_allow_html=True)
+  with st.spinner("⚡ Chiamata all'API..."):
    try:
-    test_state=SessionState()
-    cl.bootstrap(test_state)
-    ans,tags=cl.chat(message=test_q,state=test_state,use_engineer=True,force_complete=False)
-    ms=int((time.perf_counter()-t0)*1000)
-    result={"status":"success","answer":ans,"session_id":str(uuid.uuid4())[:8],"enhancements":tags,"elapsed_ms":ms}
-    st.code(json.dumps(result,indent=2,ensure_ascii=False),language="json")
-    st.caption(f"⏱ {ms}ms")
+    data=api_ask(test_q,engineer=True,complete=False)
+    st.code(json.dumps(data,indent=2,ensure_ascii=False),language="json")
    except Exception as e:
     st.code(json.dumps({"status":"error","error":str(e)},indent=2),language="json")
  st.markdown(f"""<div style='margin-top:32px;padding:20px;background:rgba(139,92,246,0.04);border:1px solid rgba(139,92,246,0.1);border-radius:14px;'>
-  <div style='color:#a78bfa;font-weight:600;font-size:14px;'>💡 Come funziona</div>
-  <ul style='color:#888;font-size:13px;line-height:2;margin-top:8px;'>
-   <li>Aggiungi <code>?q=DOMANDA</code> all'URL base per attivare modalità API</li>
-   <li>Streamlit renderizza SOLO il JSON, senza UI</li>
-   <li>Estrai con regex <code>&lt;code&gt;(JSON)&lt;/code&gt;</code></li>
-   <li>Rate limit: ~30 req/min per IP</li>
-   <li>Sessioni: in RAM (persistono finché il server è attivo)</li>
-   <li>Test in browser: <a href="{BASE_URL}/?q=Ciao" target="_blank">apri esempio</a></li>
+  <div style='color:#a78bfa;font-weight:600;font-size:14px;'>💡 Note</div>
+  <ul style='color:#888;font-size:13px;line-height:2;margin-top:8px;padding-left:20px;'>
+   <li>API pubblica gratuita — no rate limit noto</li>
+   <li>Sessioni in RAM · auto-cleanup dopo 2h</li>
+   <li>Risposte in italiano di default</li>
+   <li>Max ~2500 token per prompt</li>
+   <li>Test browser: <a href="{API_BASE}/ask?q=Ciao" target="_blank" style='color:#a78bfa;'>{API_BASE}/ask?q=Ciao</a></li>
   </ul>
  </div>""",unsafe_allow_html=True)
 elif st.session_state.page=="chat":
+ if not online:
+  st.error(f"⚠ API offline: {API_BASE}")
+  st.info("L'API su Railway non risponde. Controlla lo status del deploy.")
+  st.stop()
  if not st.session_state.msg:
   st.markdown("""<div class='hero'>
    <div class='hero-icon'>✨</div>
    <div class='hero-title'>Come posso aiutarti?</div>
-   <div class='hero-sub'>Chat, analisi file, coding, ricerche — gratis</div>
+   <div class='hero-sub'>Chat, coding, ricerche, idee — tutto gratis</div>
   </div>""",unsafe_allow_html=True)
+  cols=st.columns(3)
+  suggestions=[("💡","Spiegami il machine learning in modo semplice"),("🐍","Scrivi un web scraper Python"),("📊","Dammi 20 idee per un progetto AI")]
+  for i,(ic,txt) in enumerate(suggestions):
+   if cols[i].button(f"{ic}  {txt}",use_container_width=True,key=f"sug_{i}"):
+    st.session_state._pending_msg=txt
+    st.rerun()
  for m in st.session_state.msg:
   with st.chat_message(m["role"],avatar="👤" if m["role"]=="user" else "✨"):
-   if m.get("files"):
-    chips="".join(f"<span class='chip'>{'🖼' if fi.get('kind')=='image' else '📝'} {fi['name']}</span>" for fi in m["files"])
-    st.markdown(f"<div style='margin-bottom:8px;'>{chips}</div>",unsafe_allow_html=True)
    st.markdown(m["content"])
    if m.get("ms"):
     tags_html="".join(f"<span class='meta-tag'>{t}</span>" for t in(m.get("tags") or[]))
     st.markdown(f"<div class='meta'><span>⏱ {m['ms']}ms</span>{tags_html}</div>",unsafe_allow_html=True)
- if p:=st.chat_input("Scrivi a Gemini..."):
-  attached=list(st.session_state.pending)
-  amt=[{"name":f["name"],"kind":f["kind"],"size":f["size"]} for f in attached]
-  st.session_state.msg.append({"role":"user","content":p,"files":amt})
-  with st.chat_message("user",avatar="👤"):
-   if amt:
-    chips="".join(f"<span class='chip'>{'🖼' if fi['kind']=='image' else '📝'} {fi['name']}</span>" for fi in amt)
-    st.markdown(f"<div style='margin-bottom:8px;'>{chips}</div>",unsafe_allow_html=True)
-   st.markdown(p)
+ pending=st.session_state.pop("_pending_msg",None)
+ p=pending or st.chat_input("Scrivi a Gemini...")
+ if p:
+  st.session_state.msg.append({"role":"user","content":p})
+  with st.chat_message("user",avatar="👤"):st.markdown(p)
   with st.chat_message("assistant",avatar="✨"):
    ph=st.empty()
-   info=st.empty()
+   ph.markdown("<div style='color:#888;font-size:14px;'>Sto pensando ✨</div>",unsafe_allow_html=True)
    t0=time.perf_counter()
-   final_prompt=p
-   uploaded=[]
-   text_blocks=[]
    try:
-    text_files=[f for f in attached if f["kind"]=="text"]
-    image_files=[f for f in attached if f["kind"]=="image"]
-    for f in text_files:
-     if f["size"]>500000:info.warning(f"⚠ {f['name']} troppo grande");continue
-     content=read_text(f["bytes"],f["name"])
-     text_blocks.append(fmt_file(f["name"],content))
-    if text_blocks:final_prompt="".join(text_blocks)+"\n\n"+p
-    if image_files:
-     for idx,f in enumerate(image_files):
-      info.markdown(f"<div style='color:#888;font-size:13px;'>⬆ {f['name']} ({idx+1}/{len(image_files)})…</div>",unsafe_allow_html=True)
-      try:
-       result=cl.upload_image(f["bytes"],f["name"],f["mime"] or"image/jpeg")
-       uploaded.append(result)
-      except Exception as ue:info.error(f"❌ {f['name']}: {ue}");raise
-     info.markdown(f"<div style='color:#34d399;font-size:13px;'>✓ {len(uploaded)} immagini</div>",unsafe_allow_html=True)
-    ph.markdown("<div style='color:#888;font-size:14px;'>Sto pensando ✨</div>",unsafe_allow_html=True)
-    ans,tags=cl.chat(message=final_prompt,state=gs,use_engineer=st.session_state.eng,force_complete=st.session_state.fc,files=uploaded if uploaded else None)
-    ms=int((time.perf_counter()-t0)*1000)
-    info.empty()
+    data=api_ask(p,session_id=st.session_state.sid,engineer=st.session_state.eng,complete=st.session_state.fc)
+    ans=data["answer"]
+    tags=data.get("enhancements",[])
+    ms=data.get("elapsed_ms",int((time.perf_counter()-t0)*1000))
+    if data.get("session_id"):st.session_state.sid=data["session_id"]
     ph.markdown(ans)
     tags_html="".join(f"<span class='meta-tag'>{t}</span>" for t in tags)
     st.markdown(f"<div class='meta'><span>⏱ {ms}ms</span>{tags_html}</div>",unsafe_allow_html=True)
     st.session_state.msg.append({"role":"assistant","content":ans,"ms":ms,"tags":tags})
-    st.session_state.pending=[]
-    st.session_state.upk+=1
-   except RuntimeError as e:
-    info.empty();ph.error(f"⚠ {e}")
-    if st.session_state.debug:st.code(traceback.format_exc())
-   except Exception as e:
-    info.empty();ph.error(f"⚠ {type(e).__name__}: {e}")
-    if st.session_state.debug:st.code(traceback.format_exc())
-    st.session_state.gs=SessionState()
+   except RuntimeError as e:ph.error(f"⚠ {e}")
+   except Exception as e:ph.error(f"⚠ {type(e).__name__}: {e}")
+ if pending:st.rerun()
