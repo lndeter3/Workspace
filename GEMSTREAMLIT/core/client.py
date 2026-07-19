@@ -1,4 +1,4 @@
-import re,json,time,os
+import re,json,time
 from urllib.parse import quote
 from curl_cffi import requests as R
 from .parser import GeminiParser
@@ -12,7 +12,9 @@ class GeminiClient:
  LR=re.compile(r'\b(\d{2,})\s+(?:titoli|giochi|film|libri|nomi|esempi|idee|cose|elementi|items?|prodotti|canzoni|album|serie|prompt|domande|risposte)',re.I)
  def __init__(self):self._h=self._mk()
  def _mk(self):
-  s=R.Session(impersonate="chrome131");s.headers.update({"user-agent":self.UA,"accept":"*/*","accept-language":"it-IT,it;q=0.9,en;q=0.8","origin":self.B,"referer":self.B+"/","x-same-domain":"1"});s.cookies.update({"SOCS":self.CK});return s
+  s=R.Session(impersonate="chrome131")
+  s.headers.update({"user-agent":self.UA,"accept":"*/*","accept-language":"it-IT,it;q=0.9,en;q=0.8","origin":self.B,"referer":self.B+"/","x-same-domain":"1"})
+  s.cookies.update({"SOCS":self.CK});return s
  def bootstrap(self,st):
   r=self._h.get(self.A,timeout=12);r.raise_for_status();h=r.text
   for n,a in[("FdrFJe","fsid"),("cfb2h","bl"),("SNlM0e","at")]:
@@ -50,15 +52,19 @@ class GeminiClient:
     if a<3:time.sleep(1);continue
   raise RuntimeError(f"Tentativi esauriti: {last}")
  def _send(self,msg,st,files=None):
-  st.reqid+=100000;p={"bl":st.bl,"f.sid":st.fsid or"-1","hl":"it","_reqid":str(st.reqid),"rt":"c"}
+  st.reqid+=100000
+  p={"bl":st.bl,"f.sid":st.fsid or"-1","hl":"it","_reqid":str(st.reqid),"rt":"c"}
   att=[[[f["id"],f["name"]],1] for f in files] if files else None
-  mp=[msg,0,None,att,None,None,0];ip=[st.cid,st.rid,st.rcid,None,None,None,None,None,None,""]
+  mp=[msg,0,None,att,None,None,0]
+  ip=[st.cid,st.rid,st.rcid,None,None,None,None,None,None,""]
   inner=[mp,["it"],ip];outer=[None,json.dumps(inner,ensure_ascii=False)]
   body="f.req="+quote(json.dumps(outer,ensure_ascii=False),safe="")
   if st.at:body+="&at="+quote(st.at,safe="")
   r=self._h.post(self.S,params=p,data=body,headers={"content-type":"application/x-www-form-urlencoded;charset=UTF-8"},timeout=60 if files else 30)
   if r.status_code!=200:raise ValueError(f"HTTP {r.status_code}")
-  txt,ids=GeminiParser.parse(r.text);st.cid=ids["cid"] or st.cid;st.rid=ids["rid"] or st.rid;st.rcid=ids["rcid"] or st.rcid;return txt
+  txt,ids=GeminiParser.parse(r.text)
+  st.cid=ids["cid"] or st.cid;st.rid=ids["rid"] or st.rid;st.rcid=ids["rcid"] or st.rcid
+  return txt
  def _cont(self,orig,ans,state):
   m=self.LR.search(orig)
   if not m:return ans
