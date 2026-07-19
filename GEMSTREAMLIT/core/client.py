@@ -1,4 +1,4 @@
-import re,json,time
+import re,json,time,os
 from urllib.parse import quote
 from curl_cffi import requests as R
 from .parser import GeminiParser
@@ -19,16 +19,14 @@ class GeminiClient:
    m=re.search(rf'"{n}"\s*:\s*"([^"]+)"',h)
    if m:setattr(st,a,m.group(1))
   if not st.bl:raise RuntimeError("Bootstrap: bl mancante")
- def upload_file(self,path,name,mime,state):
-  import os
-  size=os.path.getsize(path)
+ def upload_bytes(self,data,name,mime):
+  size=len(data)
   h1={"x-goog-upload-command":"start","x-goog-upload-protocol":"resumable","x-goog-upload-header-content-length":str(size),"x-goog-upload-header-content-type":mime,"content-type":"application/x-www-form-urlencoded;charset=UTF-8"}
   r1=self._h.post(self.U,headers=h1,data=f"File name: {name}",timeout=20)
   url=r1.headers.get("x-goog-upload-url")
-  if not url:raise RuntimeError(f"Upload init: HTTP {r1.status_code}")
-  with open(path,"rb") as f:data=f.read()
+  if not url:raise RuntimeError(f"Upload init HTTP {r1.status_code}")
   r2=self._h.post(url,headers={"x-goog-upload-command":"upload, finalize","x-goog-upload-offset":"0"},data=data,timeout=60)
-  if r2.status_code!=200:raise RuntimeError(f"Upload: HTTP {r2.status_code}")
+  if r2.status_code!=200:raise RuntimeError(f"Upload HTTP {r2.status_code}")
   uid=r2.text.strip()
   if not uid or len(uid)<5:raise RuntimeError("Upload ID invalido")
   return uid
@@ -40,7 +38,7 @@ class GeminiClient:
   for a in range(4):
    try:
     ans=self._send(message,state,files);ans=PromptEngineer.clean(ans)
-    if force_complete:ans=self._cont(orig,ans,state)
+    if force_complete and not files:ans=self._cont(orig,ans,state)
     return ans,tags
    except ValueError as e:
     m=str(e)
@@ -58,7 +56,7 @@ class GeminiClient:
   inner=[mp,["it"],ip];outer=[None,json.dumps(inner,ensure_ascii=False)]
   body="f.req="+quote(json.dumps(outer,ensure_ascii=False),safe="")
   if st.at:body+="&at="+quote(st.at,safe="")
-  r=self._h.post(self.S,params=p,data=body,headers={"content-type":"application/x-www-form-urlencoded;charset=UTF-8"},timeout=45 if files else 30)
+  r=self._h.post(self.S,params=p,data=body,headers={"content-type":"application/x-www-form-urlencoded;charset=UTF-8"},timeout=60 if files else 30)
   if r.status_code!=200:raise ValueError(f"HTTP {r.status_code}")
   txt,ids=GeminiParser.parse(r.text);st.cid=ids["cid"] or st.cid;st.rid=ids["rid"] or st.rid;st.rcid=ids["rcid"] or st.rcid;return txt
  def _cont(self,orig,ans,state):
@@ -71,6 +69,6 @@ class GeminiClient:
   act=max((x for x in found if x<=req),default=0)
   if act==0 or act>=req*0.85:return ans
   try:
-   add=self._send(f"Continua dal numero {act+1} fino al {req}. Solo i {req-act} mancanti.",state)
+   add=self._send(f"Continua dal {act+1} al {req}. Solo i {req-act} mancanti.",state)
    return ans.rstrip()+"\n\n"+PromptEngineer.clean(add).strip()
   except:return ans
