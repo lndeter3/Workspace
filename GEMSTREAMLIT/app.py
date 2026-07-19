@@ -35,6 +35,36 @@ h1,h2,h3{color:#ececec!important;font-weight:600;}
 </style>
 """
 st.markdown(CSS,unsafe_allow_html=True)
+TEXT_EXT={".txt",".md",".csv",".json",".py",".js",".ts",".jsx",".tsx",".html",".css",".xml",".yaml",".yml",".sh",".bash",".sql",".c",".cpp",".h",".hpp",".java",".kt",".go",".rs",".rb",".php",".swift",".toml",".ini",".cfg",".log",".env",".gitignore",".dockerfile"}
+IMG_EXT={".png",".jpg",".jpeg",".webp",".gif",".bmp"}
+LANG_MAP={"py":"python","js":"javascript","ts":"typescript","sh":"bash","bash":"bash","cpp":"cpp","c":"c","cs":"csharp","java":"java","kt":"kotlin","go":"go","rs":"rust","rb":"ruby","php":"php","sql":"sql","html":"html","css":"css","json":"json","yaml":"yaml","yml":"yaml","toml":"toml","xml":"xml","md":"markdown"}
+MAX_TEXT_BYTES=500000
+MAX_TEXT_LINES=5000
+def is_text_file(name,mime):
+ ext=os.path.splitext(name)[1].lower()
+ if ext in TEXT_EXT:return True
+ if mime and (mime.startswith("text/") or mime in ("application/json","application/xml","application/javascript")):return True
+ return False
+def is_image_file(name,mime):
+ ext=os.path.splitext(name)[1].lower()
+ if ext in IMG_EXT:return True
+ if mime and mime.startswith("image/"):return True
+ return False
+def read_text_bytes(data,name):
+ for enc in ["utf-8","latin-1","cp1252"]:
+  try:return data.decode(enc,errors="replace")
+  except:continue
+ return data.decode("utf-8",errors="replace")
+def format_text_file(name,content):
+ ext=os.path.splitext(name)[1].lower().lstrip(".")
+ lang=LANG_MAP.get(ext,ext)
+ lines=content.split("\n")
+ trunc=""
+ if len(lines)>MAX_TEXT_LINES:
+  content="\n".join(lines[:MAX_TEXT_LINES])
+  trunc=f", TRONCATO a {MAX_TEXT_LINES} righe di {len(lines)}"
+ size=len(content.encode("utf-8"))
+ return f"\n[FILE: {name} ({size}B, {len(lines)} righe{trunc})]\n```{lang}\n{content}\n```\n"
 @st.cache_resource
 def gc():return GeminiClient()
 def _i():
@@ -61,80 +91,16 @@ with st.sidebar:
  st.session_state.fc=st.toggle("📝 Auto-completa liste",value=st.session_state.fc)
  st.session_state.debug=st.toggle("🐛 Debug",value=st.session_state.debug)
  st.markdown("<div style='margin:20px 0 10px;color:#8e8e8e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;'>📎 Allegati</div>",unsafe_allow_html=True)
- up=st.file_uploader("Carica",type=["png","jpg","jpeg","webp","gif","pdf","txt","md","csv","json","py","js","html","css","xml","yaml","yml"],accept_multiple_files=True,key=f"up_{st.session_state.upk}",label_visibility="collapsed")
+ up=st.file_uploader("Carica",type=["png","jpg","jpeg","webp","gif","bmp","txt","md","csv","json","py","js","ts","jsx","tsx","html","css","xml","yaml","yml","sh","sql","c","cpp","h","java","kt","go","rs","rb","php","toml","ini","cfg","log","env"],accept_multiple_files=True,key=f"up_{st.session_state.upk}",label_visibility="collapsed")
  if up:
   existing={(x["name"],x["size"]) for x in st.session_state.pending}
   for f in up:
    if (f.name,f.size) not in existing:
-    st.session_state.pending.append({"name":f.name,"size":f.size,"bytes":f.getvalue(),"mime":f.type or "application/octet-stream","uploaded":False,"id":None})
+    mime=f.type or ""
+    kind="text" if is_text_file(f.name,mime) else "image" if is_image_file(f.name,mime) else "binary"
+    st.session_state.pending.append({"name":f.name,"size":f.size,"bytes":f.getvalue(),"mime":mime,"kind":kind})
  if st.session_state.pending:
   st.markdown(f"<div style='color:#8e8e8e;font-size:12px;margin:8px 0 4px;'>{len(st.session_state.pending)} file pronti</div>",unsafe_allow_html=True)
   for i,f in enumerate(st.session_state.pending):
    c1,c2=st.columns([5,1])
-   ic="🖼" if f["mime"].startswith("image/") else "📄"
-   status="✓" if f["uploaded"] else "○"
-   c1.markdown(f"<div class='file-chip'>{ic} {f['name'][:22]}{'...' if len(f['name'])>22 else ''} <span style='color:#666;font-size:11px;'>{f['size']/1024:.0f}KB {status}</span></div>",unsafe_allow_html=True)
-   if c2.button("✕",key=f"rm_{i}"):
-    st.session_state.pending.pop(i)
-    st.rerun()
- st.markdown("<div style='position:absolute;bottom:20px;left:20px;right:20px;'>",unsafe_allow_html=True)
- dot="status-on" if gs.bl else "status-off"
- st.markdown(f"<div style='color:#8e8e8e;font-size:12px;'><span class='status-dot {dot}'></span>{'Connesso' if gs.bl else 'Off'}</div><div style='color:#555;font-size:10px;margin-top:4px;font-family:monospace;'>{st.session_state.sid[:16]}</div></div>",unsafe_allow_html=True)
-if not st.session_state.msg:
- st.markdown("<div class='hero'><div class='hero-title'>✨ Come posso aiutarti oggi?</div><div class='hero-sub'>Chiedi qualsiasi cosa, carica file, esplora idee</div></div>",unsafe_allow_html=True)
-for m in st.session_state.msg:
- with st.chat_message(m["role"],avatar="👤" if m["role"]=="user" else "✨"):
-  if m.get("files"):
-   chips="".join(f"<span class='file-chip'>{'🖼' if fi.get('mime','').startswith('image/') else '📄'} {fi['name']}</span>" for fi in m["files"])
-   st.markdown(f"<div style='margin-bottom:8px;'>{chips}</div>",unsafe_allow_html=True)
-  st.markdown(m["content"])
-  if m.get("ms"):
-   tg=" · ".join(m.get("tags") or [])
-   st.caption(f"⏱ {m['ms']}ms"+(f" · 🔧 {tg}" if tg else ""))
-if p:=st.chat_input("Scrivi a Gemini..."):
- attached=list(st.session_state.pending)
- amt=[{"name":f["name"],"mime":f["mime"],"size":f["size"]} for f in attached]
- st.session_state.msg.append({"role":"user","content":p,"files":amt})
- with st.chat_message("user",avatar="👤"):
-  if amt:
-   chips="".join(f"<span class='file-chip'>{'🖼' if fi['mime'].startswith('image/') else '📄'} {fi['name']}</span>" for fi in amt)
-   st.markdown(f"<div style='margin-bottom:8px;'>{chips}</div>",unsafe_allow_html=True)
-  st.markdown(p)
- with st.chat_message("assistant",avatar="✨"):
-  ph=st.empty()
-  info=st.empty()
-  t0=time.perf_counter()
-  uploaded=[]
-  try:
-   if attached:
-    for idx,f in enumerate(attached):
-     info.markdown(f"<div style='color:#8e8e8e;font-size:13px;'>⬆ Upload {f['name']} ({idx+1}/{len(attached)})...</div>",unsafe_allow_html=True)
-     try:
-      result=cl.upload_bytes(f["bytes"],f["name"],f["mime"])
-      uploaded.append(result)
-      if st.session_state.debug:st.caption(f"✓ {f['name']} → ID: {result['id'][:20]}...")
-     except Exception as ue:
-      err_msg=f"❌ Upload {f['name']}: {ue}"
-      if st.session_state.debug:err_msg+=f"\n```\n{traceback.format_exc()}\n```"
-      info.error(err_msg)
-      raise
-    info.markdown(f"<div style='color:#10a37f;font-size:13px;'>✓ {len(uploaded)} file caricati</div>",unsafe_allow_html=True)
-   ph.markdown("<div style='color:#8e8e8e;'>_Sto pensando..._ ⏳</div>",unsafe_allow_html=True)
-   ans,tags=cl.chat(message=p,state=gs,use_engineer=st.session_state.eng,force_complete=st.session_state.fc,files=uploaded if uploaded else None)
-   ms=int((time.perf_counter()-t0)*1000)
-   info.empty()
-   ph.markdown(ans)
-   tg=" · ".join(tags) if tags else ""
-   st.caption(f"⏱ {ms}ms"+(f" · 🔧 {tg}" if tg else ""))
-   st.session_state.msg.append({"role":"assistant","content":ans,"ms":ms,"tags":tags})
-   st.session_state.pending=[]
-   st.session_state.upk+=1
-  except RuntimeError as e:
-   info.empty()
-   ph.error(f"⚠ {e}")
-   if st.session_state.debug:st.code(traceback.format_exc())
-  except Exception as e:
-   info.empty()
-   ph.error(f"⚠ {type(e).__name__}: {e}")
-   if st.session_state.debug:st.code(traceback.format_exc())
-   st.session_state.gs=SessionState()
+   
