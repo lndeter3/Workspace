@@ -1,0 +1,12 @@
+gemini-web/
+├── api.py              # FastAPI backend
+├── app.py              # Streamlit frontend  
+├── core/
+│   ├── __init__.py
+│   ├── client.py       # GeminiChat core
+│   ├── parser.py       # Parser risposta
+│   ├── prompt.py       # PromptEngineer
+│   └── session.py      # SessionManager
+├── requirements.txt
+└── .streamlit/
+    └── config.toml
